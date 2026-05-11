@@ -1,0 +1,6 @@
+<div data-controller="flash"
+     class="flex items-start gap-3 px-4 py-3 rounded-lg text-sm font-medium shadow-lg
+       <%= type == :notice ? 'bg-zinc-800 border border-amber-500/30 text-amber-400' : 'bg-zinc-800 border border-red-500/30 text-red-400' %>">
+  <span class="flex-1"><%= message %></span>
+  <button data-action="click->flash#dismiss" class="shrink-0 opacity-60 hover:opacity-100 transition-opacity leading-none">✕</button>
+</div>

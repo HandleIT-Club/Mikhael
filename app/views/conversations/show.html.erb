@@ -1,0 +1,86 @@
+<% content_for :title, @conversation.title %>
+
+<div class="flex h-screen w-full" data-controller="chat">
+  <%# Sidebar %>
+  <aside class="w-72 flex-shrink-0 border-r border-zinc-800 flex flex-col">
+    <div class="p-5 border-b border-zinc-800">
+      <%= link_to conversations_path, class: "text-amber-400 font-bold tracking-widest text-sm uppercase hover:text-amber-300 transition-colors" do %>
+        M I K H A E L
+      <% end %>
+    </div>
+
+    <div class="p-4">
+      <%= link_to "Nueva conversación", conversations_path(new: 1),
+            class: "block w-full py-2 px-4 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm transition-colors text-center" %>
+    </div>
+
+    <nav class="flex-1 overflow-y-auto px-2 space-y-1">
+      <% Conversation.recent.each do |conv| %>
+        <div class="group flex items-center gap-2 rounded-lg px-3 py-2 <%= conv == @conversation ? 'bg-zinc-800' : 'hover:bg-zinc-800' %> transition-colors">
+          <%= link_to conversation_path(conv), class: "flex-1 min-w-0" do %>
+            <p class="text-sm <%= conv == @conversation ? 'text-amber-400' : 'text-zinc-300' %> truncate"><%= conv.title %></p>
+            <p class="text-xs text-zinc-600 mt-0.5"><%= conv.provider == "groq" ? "Groq" : "Ollama" %> · <%= conv.model_id %></p>
+          <% end %>
+          <%= button_to conversation_path(conv), method: :delete,
+                class: "opacity-0 group-hover:opacity-100 p-1 rounded text-zinc-600 hover:text-red-400 transition-all",
+                data: { turbo_confirm: "¿Eliminar esta conversación?" } do %>
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          <% end %>
+        </div>
+      <% end %>
+    </nav>
+  </aside>
+
+  <%# Chat area %>
+  <main class="flex-1 flex flex-col min-w-0">
+    <%# Header %>
+    <div class="border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
+      <div>
+        <h2 class="font-medium text-zinc-100"><%= @conversation.title %></h2>
+        <p class="text-xs text-zinc-500 mt-0.5">
+          <%= @conversation.provider == "groq" ? "Groq" : "Ollama" %> · <%= @conversation.model_id %>
+        </p>
+      </div>
+    </div>
+
+    <%# Messages %>
+    <div id="messages" class="flex-1 overflow-y-auto px-6 py-4 space-y-6"
+         data-chat-target="messages">
+      <% @messages.each_with_index do |message, i| %>
+        <% orphaned = message.role == "user" && @messages[i + 1]&.role == "user" %>
+        <%= render "messages/message", message: message, orphaned: orphaned %>
+      <% end %>
+    </div>
+
+    <%# Loading indicator %>
+    <div id="loading-indicator" class="hidden px-6 pb-2 flex justify-start" data-chat-target="loading">
+      <div class="flex items-center gap-3 bg-zinc-900 border border-zinc-800 rounded-2xl rounded-tl-sm px-4 py-3">
+        <span class="fire-sword text-xl">⚔️</span>
+        <span class="text-xs text-zinc-500">Mikhael está pensando...</span>
+      </div>
+    </div>
+
+    <%# Input %>
+    <div class="border-t border-zinc-800 px-6 py-4">
+      <%= form_with url: conversation_messages_path(@conversation),
+            data: { controller: "message-form",
+                    action: "turbo:submit-start->message-form#disable turbo:submit-end->message-form#reset" },
+            class: "flex gap-3 items-end" do |f| %>
+        <%= f.text_area :message_content,
+              name: "message[content]",
+              placeholder: "Preguntá algo...",
+              rows: 1,
+              class: "flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-amber-500 resize-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
+              data: {
+                message_form_target: "input",
+                action: "keydown->message-form#submitOnEnter"
+              } %>
+        <%= f.submit "Enviar",
+              class: "px-5 py-3 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold rounded-xl text-sm transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed",
+              data: { message_form_target: "submit" } %>
+      <% end %>
+    </div>
+  </main>
+</div>

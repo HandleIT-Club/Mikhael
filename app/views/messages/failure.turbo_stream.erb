@@ -1,0 +1,22 @@
+<%# Mostrar el mensaje del usuario que se guardó, marcado como huérfano %>
+<% if @user_message %>
+  <%= turbo_stream.append "messages", partial: "messages/message", locals: { message: @user_message, orphaned: true } %>
+<% end %>
+
+<%# Mostrar burbuja de error en el chat %>
+<%= turbo_stream.append "messages" do %>
+  <div class="flex justify-start">
+    <div class="max-w-[75%] space-y-1">
+      <p class="text-xs text-amber-400 font-medium px-1">Mikhael</p>
+      <div class="rounded-2xl rounded-tl-sm px-4 py-3 text-sm bg-zinc-900 border border-red-500/30 text-red-400 flex items-center gap-2">
+        <span>⚠️</span>
+        <span><%= t("errors.ai.#{@error}", default: t("errors.ai.default")) %></span>
+      </div>
+    </div>
+  </div>
+<% end %>
+
+<%# Notificación en el flash también %>
+<%= turbo_stream.update "flash" do %>
+  <%= render "shared/error", error: @error %>
+<% end %>

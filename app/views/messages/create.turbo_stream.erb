@@ -1,0 +1,5 @@
+<%# Agregar los últimos dos mensajes (user + assistant) al chat %>
+<% @conversation.chat_messages.last(2).each do |message| %>
+  <%= turbo_stream.append "messages", partial: "messages/message", locals: { message: message } %>
+<% end %>
+

@@ -1,0 +1,69 @@
+<% content_for :title, "Mikhael" %>
+
+<div class="flex h-screen w-full" data-controller="modal" <%= "data-modal-auto-open" if params[:new] %>>
+  <%# Sidebar %>
+  <aside class="w-72 flex-shrink-0 border-r border-zinc-800 flex flex-col">
+    <div class="p-5 border-b border-zinc-800">
+      <h1 class="text-amber-400 font-bold tracking-widest text-sm uppercase">M I K H A E L</h1>
+    </div>
+
+    <div class="p-4">
+      <button data-action="click->modal#open"
+              class="w-full py-2 px-4 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm transition-colors">
+        Nueva conversación
+      </button>
+    </div>
+
+    <nav class="flex-1 overflow-y-auto px-2 space-y-1">
+      <% @conversations.each do |conversation| %>
+        <%= render "conversations/conversation", conversation: conversation %>
+      <% end %>
+    </nav>
+  </aside>
+
+  <%# Welcome screen %>
+  <main class="flex-1 flex items-center justify-center">
+    <div class="text-center space-y-3">
+      <p class="text-5xl font-thin tracking-[0.3em] text-amber-400">MIKHAEL</p>
+      <p class="text-zinc-500 text-sm">«¿Quién como Dios?»</p>
+    </div>
+  </main>
+
+  <%# Modal nueva conversación %>
+  <div data-modal-target="overlay"
+       class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center"
+       data-action="click->modal#closeOnBackdrop">
+    <div class="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-96 space-y-4" data-modal-target="panel">
+      <h2 class="text-amber-400 font-semibold">Nueva conversación</h2>
+
+      <%= form_with model: @conversation, class: "space-y-4" do |f| %>
+        <div>
+          <%= f.label :title, "Título", class: "block text-sm text-zinc-400 mb-1" %>
+          <%= f.text_field :title, placeholder: "Ej: Ruby on Rails dudas",
+                class: "w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-amber-500" %>
+        </div>
+
+        <div>
+          <%= f.label :model_id, "Modelo", class: "block text-sm text-zinc-400 mb-1" %>
+          <%= f.select :model_id,
+                grouped_options_for_select(
+                  {
+                    "Ollama (local)" => [["llama3.2:3b", "llama3.2:3b"], ["qwen2.5-coder:3b", "qwen2.5-coder:3b"]],
+                    "Groq (nube)"    => [["llama-3.3-70b-versatile", "llama-3.3-70b-versatile"], ["meta-llama/llama-4-scout-17b-16e-instruct", "meta-llama/llama-4-scout-17b-16e-instruct"]]
+                  }
+                ),
+                {},
+                class: "w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-amber-500" %>
+        </div>
+
+        <div class="flex gap-3 pt-2">
+          <%= f.submit "Crear", class: "flex-1 py-2 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold rounded-lg text-sm transition-colors cursor-pointer" %>
+          <button type="button" data-action="click->modal#close"
+                  class="flex-1 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-sm transition-colors">
+            Cancelar
+          </button>
+        </div>
+      <% end %>
+    </div>
+  </div>
+</div>

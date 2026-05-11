@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full">
+  <head>
+    <title><%= content_for(:title) || "Mikhael" %></title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <%= csrf_meta_tags %>
+    <%= csp_meta_tag %>
+    <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
+    <%= javascript_importmap_tags %>
+  </head>
+
+  <body class="h-full bg-zinc-950 text-zinc-100 antialiased">
+    <div id="flash" class="fixed top-4 right-4 z-50 space-y-2 max-w-sm">
+      <% if notice %>
+        <%= render "shared/flash", type: :notice, message: notice %>
+      <% end %>
+      <% if alert %>
+        <%= render "shared/flash", type: :alert, message: alert %>
+      <% end %>
+    </div>
+
+    <%= yield %>
+  </body>
+</html>
