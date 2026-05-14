@@ -1,0 +1,696 @@
+#!/usr/bin/env ruby
+# Mikhael — Personal AI Assistant
+# Copyright (C) 2026 Nicolás S. Navarro
+# Licensed under AGPL-3.0 — https://www.gnu.org/licenses/agpl-3.0.html
+# Uso: mikhael [-a]
+#   -a  Modo agente (detecta y ejecuta comandos de shell)
+require "net/http"
+require "json"
+require "uri"
+require "readline"
+require "socket"
+
+RAILS_PROJECT = ENV.fetch("MIKHAEL_PROJECT", File.expand_path("~/mikhael"))
+
+# Cargar variables del .env del proyecto Mikhael (sin pisar las que ya estén en el shell).
+env_file = File.join(RAILS_PROJECT, ".env")
+if File.exist?(env_file)
+  File.foreach(env_file) do |line|
+    line = line.strip
+    next if line.empty? || line.start_with?("#")
+    key, val = line.split("=", 2)
+    next unless key && val
+    ENV[key.strip] ||= val.strip.gsub(/\A["']|["']\z/, "")
+  end
+end
+
+RAILS_URL    = ENV.fetch("MIKHAEL_URL", "http://localhost:3000")
+APP_PASSWORD = ENV["MIKHAEL_PASSWORD"].to_s.strip
+
+module C
+  RST  = "\033[0m"
+  BOLD = "\033[1m"
+  CYN  = "\033[0;36m"
+  GRN  = "\033[0;32m"
+  YEL  = "\033[1;33m"
+  RED  = "\033[0;31m"
+  GOLD = "\033[1;38;5;220m"
+  IVRY = "\033[1;38;5;230m"
+  DIM  = "\033[2m"
+
+  def self.cyan(s)    = "#{CYN}#{s}#{RST}"
+  def self.green(s)   = "#{GRN}#{s}#{RST}"
+  def self.yellow(s)  = "#{YEL}#{s}#{RST}"
+  def self.red(s)     = "#{RED}#{s}#{RST}"
+  def self.bold(s)    = "#{BOLD}#{s}#{RST}"
+  def self.gold(s)    = "#{GOLD}#{s}#{RST}"
+  def self.ivory(s)   = "#{IVRY}#{s}#{RST}"
+  def self.dim(s)     = "#{DIM}#{s}#{RST}"
+end
+
+# ─── Cliente Rails API ─────────────────────────────────────────────────────────
+
+class RailsClient
+  BASE = RAILS_URL
+
+  def self.get(path)
+    request(Net::HTTP::Get, path)
+  end
+
+  def self.post(path, body = nil)
+    request(Net::HTTP::Post, path, body)
+  end
+
+  def self.patch(path, body = nil)
+    request(Net::HTTP::Patch, path, body)
+  end
+
+  def self.delete(path)
+    request(Net::HTTP::Delete, path)
+  end
+
+  def self.request(klass, path, body = nil)
+    uri = URI("#{BASE}#{path}")
+    Net::HTTP.start(uri.host, uri.port) do |http|
+      req = klass.new(uri.path, "Content-Type" => "application/json", "Accept" => "application/json")
+      req.basic_auth("mikhael", APP_PASSWORD) unless APP_PASSWORD.empty?
+      req.body = body.to_json if body
+      http.read_timeout = 120
+      response = http.request(req)
+      JSON.parse(response.body) rescue nil
+    end
+  rescue Errno::ECONNREFUSED
+    raise "No se puede conectar al servidor Mikhael en #{BASE}. ¿Está corriendo 'bin/dev'?"
+  end
+end
+
+# ─── Detector de comandos ──────────────────────────────────────────────────────
+
+class CommandDetector
+  TRIPLE_BLOCK   = /```(?:bash|shell|sh|zsh|console|terminal)\n?([\s\S]*?)```/i
+  SINGLE_TICK    = /(?<!`)`(?!`)([^`\n]+?)(?<!`)`(?!`)/
+  PLACEHOLDER    = /\/(ruta|path|your|usuario|user|example|carpeta|folder|directorio)\b/i
+  SHELL_COMMANDS = %w[
+    ls cd pwd echo cat cp mv rm mkdir touch chmod chown grep find curl wget
+    git ruby python python3 bash sh gem bundle rails rake npm node make sudo
+    apt brew open code vim nano awk sed head tail wc sort uniq xargs tr cut
+    date whoami which man history clear ping ssh tar zip unzip ollama
+  ].to_set
+
+  def self.extract(text)
+    cmds = text.scan(TRIPLE_BLOCK).flatten
+               .flat_map { |b| b.strip.lines }
+               .map { |l| l.strip.sub(/^[$#]\s*/, "") }
+               .reject(&:empty?)
+               .reject { |c| PLACEHOLDER.match?(c) }
+
+    if cmds.empty?
+      cmds = text.scan(SINGLE_TICK).flatten
+                 .map(&:strip).reject(&:empty?)
+                 .select { |c| shell_command?(c) }
+                 .reject { |c| PLACEHOLDER.match?(c) }
+    end
+
+    cmds.uniq
+  end
+
+  def self.shell_command?(cmd)
+    first = cmd.split.first || ""
+    first = cmd.split[1] if first == "sudo"
+    SHELL_COMMANDS.include?(first)
+  end
+end
+
+# ─── Ejecutor de comandos ──────────────────────────────────────────────────────
+
+class CommandRunner
+  def self.confirm_and_run(command, silent: false)
+    puts
+    puts C.yellow("╔══ Comando detectado ══════════════════╗")
+    puts C.yellow("║ ") + C.bold(command)
+    puts C.yellow("╚═══════════════════════════════════════╝")
+    print C.yellow("¿Ejecutar? [s/N]: ")
+
+    return nil unless $stdin.gets&.chomp&.downcase == "s"
+
+    output = capture(command, silent: silent)
+    puts C.green("✓ Finalizado.")
+    output
+  end
+
+  def self.capture(command, silent: false)
+    lines = []
+    IO.popen(["bash", "-c", command], err: [:child, :out]) do |io|
+      io.each_line { |l| print l unless silent; lines << l }
+    end
+    lines.join
+  rescue => e
+    puts C.red("Error: #{e.message}")
+    nil
+  end
+end
+
+# ─── Gestión de dispositivos ───────────────────────────────────────────────────
+
+class DevicesMenu
+  SECURITY_LABELS = { "normal" => "🟢 normal", "high" => "🔒 alta seguridad" }.freeze
+
+  def self.run
+    loop do
+      devices = RailsClient.get("/api/v1/devices") || []
+
+      puts
+      puts C.gold("╔══ Dispositivos ═══════════════════════╗")
+      if devices.empty?
+        puts C.gold("║") + C.dim("  (ningún dispositivo registrado)      ") + C.gold("║")
+      else
+        devices.each_with_index do |d, i|
+          label   = SECURITY_LABELS[d["security_level"]] || d["security_level"]
+          actions = Array(d["actions"]).any? ? C.dim(" · #{Array(d['actions']).join(', ')}") : ""
+          puts C.gold("║") + " #{C.yellow("[#{i + 1}]")} #{d['name']} #{C.dim("(#{d['device_id']})")} — #{label}#{actions}"
+        end
+      end
+      puts C.gold("╠═══════════════════════════════════════╣")
+      puts C.gold("║") + " #{C.yellow("[n]")} Nuevo dispositivo"
+      puts C.gold("║") + " #{C.yellow("[c#]")} Comandar  (ej: c1)"
+      puts C.gold("║") + " #{C.yellow("[e#]")} Editar    (ej: e1)"
+      puts C.gold("║") + " #{C.yellow("[r#]")} Regenerar token (ej: r1)"
+      puts C.gold("║") + " #{C.yellow("[x#]")} Eliminar  (ej: x1)"
+      puts C.gold("║") + " #{C.yellow("[v]")} Volver al chat"
+      puts C.gold("╚═══════════════════════════════════════╝")
+      print C.cyan("Opción: ")
+
+      choice = $stdin.gets&.chomp&.strip&.downcase
+      return if choice.nil? || %w[v volver back].include?(choice)
+
+      if choice == "n"
+        create_device
+      elsif choice =~ /^c(\d+)$/
+        idx = $1.to_i - 1
+        command_device(devices[idx]) if idx >= 0 && idx < devices.length
+      elsif choice =~ /^e(\d+)$/
+        idx = $1.to_i - 1
+        edit_device(devices[idx]) if idx >= 0 && idx < devices.length
+      elsif choice =~ /^r(\d+)$/
+        idx = $1.to_i - 1
+        regenerate_token(devices[idx]) if idx >= 0 && idx < devices.length
+      elsif choice =~ /^x(\d+)$/
+        idx = $1.to_i - 1
+        delete_device(devices[idx]) if idx >= 0 && idx < devices.length
+      end
+    end
+  end
+
+  def self.command_device(device)
+    return unless device
+
+    puts
+    puts C.bold("Comandar: #{device['name']}")
+    puts C.dim("  El dispositivo interpretará tu mensaje y devolverá una acción.")
+    print C.cyan("  Mensaje: ")
+    message = $stdin.gets&.chomp&.strip
+    return if message.nil? || message.empty?
+
+    puts C.dim("  Enviando...")
+    result = RailsClient.post("/api/v1/devices/#{device['id']}/command", { message: message })
+
+    if result&.key?("action")
+      puts C.green("  ✓ Acción: ") + C.bold(result["action"].to_s)
+      puts C.gold("  Valor:   ") + result["value"].to_s if result["value"]
+      puts C.dim("  Razón:   #{result['reason']}")
+      puts C.red("  ⚠ Alta seguridad — requiere confirmación manual en el dispositivo.") if result["requires_confirmation"]
+    else
+      puts C.red("  ✗ Error: #{result&.dig('error') || 'respuesta inválida'}")
+    end
+  end
+
+  def self.regenerate_token(device)
+    return unless device
+
+    print C.red("  Regenerar invalida el token actual de '#{device['name']}'. ¿Continuar? [s/N]: ")
+    return puts(C.dim("  Cancelado.")) unless $stdin.gets&.chomp&.downcase == "s"
+
+    result = RailsClient.post("/api/v1/devices/#{device['id']}/regenerate_token")
+
+    if result&.key?("token")
+      puts C.green("  ✓ Token regenerado.")
+      puts C.gold("  Token: ") + C.bold(result["token"])
+      puts C.dim("  Guardalo — no se vuelve a mostrar.")
+    else
+      puts C.red("  ✗ Error: #{result&.dig('error') || 'respuesta inválida'}")
+    end
+  end
+
+  def self.create_device
+    puts
+    puts C.bold("Nuevo dispositivo")
+    print C.cyan("  ID único (ej: riego_01): ")
+    device_id = $stdin.gets&.chomp&.strip
+    return if device_id.nil? || device_id.empty?
+
+    print C.cyan("  Nombre descriptivo: ")
+    name = $stdin.gets&.chomp&.strip
+    return if name.nil? || name.empty?
+
+    puts C.cyan("  System prompt (describí el rol y las acciones posibles):")
+    print "  > "
+    system_prompt = $stdin.gets&.chomp&.strip
+    return if system_prompt.nil? || system_prompt.empty?
+
+    print C.cyan("  Acciones del firmware (ej: open_valve, close_valve): ")
+    actions = $stdin.gets&.chomp&.strip
+
+    print C.cyan("  Seguridad — [1] Normal  [2] Alta (requiere confirmación): ")
+    sec_choice = $stdin.gets&.chomp&.strip
+    security_level = sec_choice == "2" ? "high" : "normal"
+
+    result = RailsClient.post("/api/v1/devices", {
+      device: { device_id: device_id, name: name, system_prompt: system_prompt, security_level: security_level, actions: actions }
+    })
+
+    if result&.key?("token")
+      puts C.green("  ✓ Dispositivo creado.")
+      puts C.gold("  Token: ") + C.bold(result["token"])
+      puts C.dim("  Guardá este token — lo necesitás para autenticar requests desde el dispositivo.")
+      if Array(result["actions"]).any?
+        puts C.dim("  Topic MQTT: mikhael/devices/#{result['device_id']}/command")
+      end
+    else
+      puts C.red("  ✗ Error: #{result&.dig('error') || 'respuesta inválida'}")
+    end
+  end
+
+  def self.edit_device(device)
+    return unless device
+
+    puts
+    puts C.bold("Editando: #{device['name']}")
+    puts C.dim("  (Enter para mantener el valor actual)")
+    puts
+
+    puts C.cyan("  System prompt actual:")
+    puts C.dim("  #{device['system_prompt']}")
+    print C.cyan("  Nuevo (enter para mantener): ")
+    new_prompt = $stdin.gets&.chomp
+    system_prompt = (new_prompt.nil? || new_prompt.strip.empty?) ? device["system_prompt"] : new_prompt.strip
+
+    current_actions = Array(device["actions"]).join(", ")
+    print C.cyan("  Acciones actuales: #{current_actions.empty? ? '(ninguna)' : current_actions} — nuevas (enter para mantener): ")
+    new_actions_raw = $stdin.gets&.chomp
+    actions = (new_actions_raw.nil? || new_actions_raw.strip.empty?) ? current_actions : new_actions_raw.strip
+
+    current_sec = SECURITY_LABELS[device["security_level"]]
+    print C.cyan("  Seguridad actual: #{current_sec} — [1] Normal  [2] Alta  [enter] mantener: ")
+    sec_choice = $stdin.gets&.chomp&.strip
+    security_level = case sec_choice
+                     when "1" then "normal"
+                     when "2" then "high"
+                     else device["security_level"]
+                     end
+
+    result = RailsClient.patch("/api/v1/devices/#{device['id']}", {
+      device: { system_prompt: system_prompt, security_level: security_level, actions: actions }
+    })
+
+    if result&.key?("id")
+      puts C.green("  ✓ Guardado.")
+    else
+      puts C.red("  ✗ Error: #{result&.dig('error') || 'respuesta inválida'}")
+    end
+  end
+
+  def self.delete_device(device)
+    return unless device
+
+    print C.red("  ¿Eliminar '#{device['name']}'? [s/N]: ")
+    confirm = $stdin.gets&.chomp&.downcase
+    if confirm == "s"
+      RailsClient.delete("/api/v1/devices/#{device['id']}")
+      puts C.green("  ✓ Eliminado.")
+    else
+      puts C.dim("  Cancelado.")
+    end
+  end
+end
+
+# ─── Agente ───────────────────────────────────────────────────────────────────
+
+class Agent
+  PROVIDER_LABELS = {
+    "groq"      => "groq · nube",
+    "cerebras"  => "cerebras · nube",
+    "sambanova" => "sambanova · nube",
+    "ollama"    => "ollama · local"
+  }.freeze
+
+  TIER_LABELS = {
+    "advanced"     => "avanzado",
+    "intermediate" => "intermedio",
+    "basic"        => "básico"
+  }.freeze
+
+  def initialize(agent_mode:)
+    @agent_mode = agent_mode
+    @models     = []
+  end
+
+  def run
+    print_header
+    check_server
+    load_models
+    @conversation = select_or_create_conversation
+    if @conversation.nil?
+      puts C.gold("¡Hasta luego!")
+      stop_services
+      return
+    end
+    chat_loop
+    puts C.gold("¡Hasta luego!")
+    stop_services
+  end
+
+  private
+
+  # ── Servidor ──────────────────────────────────────────────────────
+
+  def check_server
+    ensure_ollama_running
+    ensure_rails_running
+    puts C.green("✓ Servidor conectado — #{RAILS_URL}")
+    print_integrations_status
+    puts
+  end
+
+  def print_integrations_status
+    providers = [
+      [ "Groq",      "GROQ_API_KEY" ],
+      [ "Cerebras",  "CEREBRAS_API_KEY" ],
+      [ "SambaNova", "SAMBANOVA_API_KEY" ]
+    ]
+    keys_line = providers.map do |name, env|
+      ENV[env].to_s.strip.empty? ? C.red("✗ #{name}") : C.green("✓ #{name}")
+    end.join(" · ")
+    puts C.dim("  API keys:     ") + keys_line
+
+    mqtt = ENV["MQTT_URL"].to_s.strip
+    puts C.dim("  MQTT push:    ") + (mqtt.empty? ? C.red("✗ desactivado") : C.green("✓ activo  #{C.dim(mqtt)}"))
+
+    tg_token = ENV["TELEGRAM_BOT_TOKEN"].to_s.strip
+    tg_chat  = ENV["TELEGRAM_CHAT_ID"].to_s.strip
+    if tg_token.empty? || tg_chat.empty?
+      puts C.dim("  Telegram bot: ") + C.red("✗ desactivado")
+    else
+      puts C.dim("  Telegram bot: ") + C.green("✓ activo  ") + C.dim("chat #{tg_chat}")
+    end
+
+    missing = providers.count { |_, env| ENV[env].to_s.strip.empty? }
+    if missing == providers.length
+      puts C.red("  ⚠ No tenés ninguna API key. Agregá al menos GROQ_API_KEY al .env.")
+    end
+  end
+
+  def ensure_ollama_running
+    return if port_open?("localhost", 11434)
+    puts C.cyan("⚡ Iniciando Ollama...")
+    @ollama_pid = Process.spawn("ollama serve", out: "/dev/null", err: "/dev/null", pgroup: 0)
+    wait_for("Ollama", "localhost", 11434)
+  end
+
+  def ensure_rails_running
+    uri = URI(RAILS_URL)
+    return if port_open?(uri.host, uri.port)
+    puts C.cyan("⚡ Iniciando Rails...")
+    @rails_pid = Process.spawn(
+      "bin/rails server -p #{uri.port}",
+      chdir: RAILS_PROJECT, out: "/dev/null", err: "/dev/null", pgroup: 0
+    )
+    wait_for("Rails", uri.host, uri.port)
+  end
+
+  def stop_services
+    if @rails_pid
+      puts C.cyan("  Cerrando Rails...")
+      Process.kill("-TERM", -@rails_pid) rescue nil
+      Process.wait(@rails_pid) rescue nil
+    end
+    if @ollama_pid
+      puts C.cyan("  Cerrando Ollama...")
+      Process.kill("-TERM", -@ollama_pid) rescue nil
+      Process.wait(@ollama_pid) rescue nil
+    end
+  end
+
+  def port_open?(host, port)
+    TCPSocket.new(host, port).close
+    true
+  rescue Errno::ECONNREFUSED, Errno::EHOSTUNREACH, SocketError
+    false
+  end
+
+  def wait_for(name, host, port, timeout: 30)
+    print C.cyan("  Esperando #{name}")
+    timeout.times do
+      return puts(C.green(" listo")) if port_open?(host, port)
+      print "."
+      sleep 1
+    end
+    puts
+    puts C.red("✗ #{name} no arrancó en #{timeout}s. Verificá manualmente.")
+    exit 1
+  end
+
+  # ── Modelos ───────────────────────────────────────────────────────
+
+  def load_models
+    @models = RailsClient.get("/api/v1/models") || []
+  rescue => e
+    puts C.yellow("⚠ No se pudieron cargar modelos: #{e.message}")
+    @models = []
+  end
+
+  def model_label(m)
+    provider = PROVIDER_LABELS[m["provider"]] || m["provider"]
+    tier     = m["tier"] ? " · #{TIER_LABELS[m['tier']] || m['tier']}" : ""
+    "%-45s %s" % [m["model_id"], C.dim("(#{provider}#{tier})")]
+  end
+
+  # ── Conversaciones ────────────────────────────────────────────────
+
+  def select_or_create_conversation
+    conversations = RailsClient.get("/api/v1/conversations") || []
+
+    if conversations.any?
+      puts C.gold("Conversaciones recientes:")
+      conversations.first(5).each_with_index do |c, i|
+        badge = PROVIDER_LABELS[c["provider"]] || c["provider"]
+        puts "  #{C.yellow("[#{i + 1}]")} #{c['title']} #{C.dim("(#{badge})")}"
+      end
+      puts "  #{C.yellow("[n]")} Nueva conversación"
+      puts "  #{C.yellow("[d]")} Gestionar dispositivos"
+      puts "  #{C.yellow("[o]")} Abrir en el navegador"
+      puts "  #{C.red("[x#]")} Eliminar (ej: x1, x2...)"
+      print C.cyan("Elegí: ")
+      choice = $stdin.gets&.chomp&.downcase&.strip
+
+      return nil if exit_command?(choice)
+
+      if choice == "d"
+        DevicesMenu.run
+        return select_or_create_conversation
+      end
+
+      if choice == "o"
+        system("open", RAILS_URL)
+        return select_or_create_conversation
+      end
+
+      if choice =~ /^x(\d+)$/
+        idx = $1.to_i - 1
+        if idx >= 0 && idx < conversations.length
+          conv = conversations[idx]
+          print C.red("¿Eliminar '#{conv['title']}'? [s/N]: ")
+          if $stdin.gets&.chomp&.downcase == "s"
+            RailsClient.delete("/api/v1/conversations/#{conv['id']}")
+            puts C.green("✓ Conversación eliminada.")
+          else
+            puts C.dim("  Cancelado.")
+          end
+        else
+          puts C.red("  Número inválido.")
+        end
+        return select_or_create_conversation
+      end
+
+      if choice != "n"
+        idx = choice.to_i - 1
+        if idx >= 0 && idx < conversations.length
+          conv = conversations[idx]
+          puts C.green("✓ Continuando: #{conv['title']}")
+          puts
+          return conv
+        end
+      end
+    end
+
+    create_conversation
+  end
+
+  def create_conversation
+    if @models.empty?
+      puts C.yellow("⚠ No hay modelos disponibles. Verificá que el servidor esté corriendo.")
+      return nil
+    end
+
+    puts C.gold("Modelos disponibles:")
+    @models.each_with_index do |m, i|
+      puts "  #{C.yellow("[#{i + 1}]")} #{model_label(m)}"
+    end
+    print C.cyan("Modelo [1-#{@models.length}]: ")
+    choice = $stdin.gets&.chomp&.strip
+
+    return nil if exit_command?(choice)
+
+    idx   = (choice.to_i - 1).clamp(0, @models.length - 1)
+    model = @models[idx]
+
+    default = "Chat #{Time.now.strftime('%d/%m %H:%M')}"
+    print C.cyan("Nombre (enter para '#{default}'): ")
+    input = $stdin.gets&.chomp
+    return nil if exit_command?(input)
+    title = (input.nil? || input.strip.empty?) ? default : input.strip
+
+    conv = RailsClient.post("/api/v1/conversations", {
+      conversation: { title: title, model_id: model["model_id"] }
+    })
+
+    if conv&.key?("id")
+      puts C.green("✓ Nueva conversación: #{conv['title']} (#{model['model_id']})")
+      puts
+      conv
+    else
+      puts C.red("✗ No se pudo crear la conversación: #{conv&.dig('error') || 'error desconocido'}")
+      nil
+    end
+  end
+
+  # ── Chat ──────────────────────────────────────────────────────────
+
+  def chat_loop
+    loop do
+      input = prompt_user
+      break if exit_command?(input)
+      next  if input.nil? || input.strip.empty?
+      break if @conversation.nil?
+      send_and_respond(input)
+    end
+  end
+
+  def send_and_respond(content)
+    print C.gold("Mikhael (pensando...)\r")
+    $stdout.flush
+
+    result = RailsClient.post(
+      "/api/v1/conversations/#{@conversation['id']}/messages",
+      { message: { content: content } }
+    )
+
+    print "\r" + " " * 35 + "\r"
+
+    if result.nil? || result["error"]
+      puts C.red("Error: #{result&.dig('error') || 'sin respuesta'}")
+      return
+    end
+
+    response = result["content"]
+
+    if result["model"] && result["model"] != @conversation["model_id"]
+      puts C.yellow("  ↪ Modelo cambiado automáticamente a #{result['model']}")
+      @conversation["model_id"] = result["model"]
+    end
+
+    if @agent_mode
+      commands = CommandDetector.extract(response)
+      if commands.any?
+        outputs = {}
+        commands.each do |cmd|
+          output = CommandRunner.confirm_and_run(cmd, silent: true)
+          outputs[cmd] = output.strip if output && !output.strip.empty?
+        end
+
+        unless outputs.empty?
+          outputs.each do |cmd, out|
+            RailsClient.post(
+              "/api/v1/conversations/#{@conversation['id']}/messages",
+              { message: { content: "Salida del comando `#{cmd}`:\n```\n#{out}\n```" } }
+            )
+          end
+          print C.gold("Mikhael (analizando...)\r")
+          $stdout.flush
+          conclusion = RailsClient.post(
+            "/api/v1/conversations/#{@conversation['id']}/messages",
+            { message: { content: "Analizá la salida anterior y dame una conclusión breve." } }
+          )
+          print "\r" + " " * 35 + "\r"
+          puts
+          puts C.gold("Mikhael:") + " #{conclusion&.dig('content')}"
+          puts
+        end
+        return
+      end
+    end
+
+    puts
+    puts C.gold("Mikhael:") + " #{response}"
+    puts
+  end
+
+  def prompt_user
+    input = Readline.readline(C.cyan("Vos: "), true)
+    return "salir" if input.nil?
+    case input.strip
+    when "limpiar", "nueva"
+      @conversation = create_conversation
+      return ""
+    when "open", "abrir"
+      system("open", RAILS_URL)
+      return ""
+    when "convs", "conversaciones", "atras", "atrás", "back"
+      @conversation = select_or_create_conversation
+      return "salir" if @conversation.nil?
+      return ""
+    when "dispositivos", "devices"
+      DevicesMenu.run
+      return ""
+    end
+    input
+  end
+
+  def exit_command?(input)
+    %w[salir exit quit q].include?(input&.strip&.downcase)
+  end
+
+  def print_header
+    puts
+    puts C.gold("╔══════════════════════════════════════╗")
+    puts C.gold("║") + C.ivory("           M I K H A E L              ") + C.gold("║")
+    puts C.gold("╚══════════════════════════════════════╝")
+    puts C.cyan("Modo: #{@agent_mode ? 'Agente' : 'Chat'}")
+    puts C.cyan("Comandos: salir · limpiar · convs · open · dispositivos")
+    puts
+  end
+end
+
+# ─── Entrada ──────────────────────────────────────────────────────────────────
+
+agent_mode = ARGV.include?("-a") || ARGV.include?("--agent")
+
+agent = Agent.new(agent_mode: agent_mode)
+
+begin
+  agent.run
+rescue Interrupt
+  puts
+  puts C.gold("Interrumpido. ¡Hasta luego!")
+  agent.send(:stop_services)
+  exit 0
+end

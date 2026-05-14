@@ -1,0 +1,17 @@
+<%# Agregar los últimos dos mensajes (user + assistant) al chat %>
+<% @conversation.chat_messages.last(2).each do |message| %>
+  <%= turbo_stream.append "messages", partial: "messages/message", locals: { message: message } %>
+<% end %>
+
+<%# Actualizar el título si se generó en el primer intercambio %>
+<% if @title_updated %>
+  <%= turbo_stream.update "conversation-title", @conversation.title %>
+  <%= turbo_stream.update "conv-title-#{@conversation.id}", @conversation.title %>
+<% end %>
+
+<%# Actualizar el selector de modelo si Mikhael cambió de modelo por rate limit %>
+<% if @model_switched %>
+  <%= turbo_stream.update "conversation-model" do %>
+    <%= render "conversations/model_selector", conversation: @conversation %>
+  <% end %>
+<% end %>

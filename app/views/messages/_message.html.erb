@@ -1,0 +1,23 @@
+<div id="<%= dom_id(message) %>"
+     class="flex <%= message.role == 'user' ? 'justify-end' : 'justify-start' %>">
+  <div class="max-w-[75%] space-y-1">
+    <% if message.role == "assistant" %>
+      <p class="text-xs text-amber-400 font-medium px-1">Mikhael</p>
+    <% end %>
+
+    <div class="rounded-2xl px-4 py-3 text-sm leading-relaxed <%= message.role == 'user' ? "bg-zinc-800 rounded-tr-sm #{local_assigns[:orphaned] ? 'border border-red-500/50 text-zinc-400' : 'text-zinc-100'}" : 'bg-zinc-900 border border-zinc-800 text-zinc-200 rounded-tl-sm prose-message' %>">
+      <% if message.role == "assistant" %>
+        <div class="markdown-content"><%= render_markdown(message.content) %></div>
+      <% else %>
+        <%= simple_format(message.content, {}, wrapper_tag: :div) %>
+      <% end %>
+    </div>
+
+    <% if message.role == "assistant" && message.model_id.present? %>
+      <p class="text-xs text-zinc-600 px-1"><%= message.model_id %></p>
+    <% end %>
+    <% if local_assigns[:orphaned] %>
+      <p class="text-xs text-red-500/70 px-1">Sin respuesta — error al contactar la IA</p>
+    <% end %>
+  </div>
+</div>

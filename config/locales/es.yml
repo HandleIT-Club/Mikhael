@@ -1,0 +1,11 @@
+es:
+  errors:
+    ai:
+      default: "Ocurrió un error con el asistente. Intentá de nuevo."
+      invalid_input: "El mensaje no puede estar vacío."
+      ollama_unavailable: "Ollama no está disponible. ¿Está corriendo 'ollama serve'?"
+      rate_limited: "Límite de requests alcanzado. Esperá un momento."
+      invalid_api_key: "Una API key no es válida. Revisá tu .env."
+      ai_error: "El asistente no pudo responder. Intentá de nuevo."
+      all_models_exhausted: "Ningún modelo disponible — todos rate-limited y no hay otros providers configurados. Esperá unos minutos o agregá otra API key (CEREBRAS_API_KEY, SAMBANOVA_API_KEY) o instalá Ollama."
+      persistence_error: "Error al guardar el mensaje."

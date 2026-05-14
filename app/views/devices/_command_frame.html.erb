@@ -1,0 +1,30 @@
+<turbo-frame id="device-cmd-<%= device.id %>">
+  <% if result %>
+    <div class="mb-3 p-3 bg-zinc-950 border border-zinc-700 rounded-lg space-y-1.5">
+      <p class="text-xs text-zinc-600 font-mono">← <%= last_message %></p>
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="text-sm font-mono font-medium text-amber-400"><%= result[:action] %></span>
+        <% if result[:value].present? %>
+          <span class="text-xs text-zinc-400 bg-zinc-800 px-2 py-0.5 rounded font-mono"><%= result[:value] %></span>
+        <% end %>
+      </div>
+      <p class="text-xs text-zinc-500 leading-relaxed"><%= result[:reason] %></p>
+      <% if result[:requires_confirmation] %>
+        <p class="text-xs text-red-400 font-medium">⚠ Alta seguridad — requiere confirmación manual en el dispositivo.</p>
+      <% end %>
+    </div>
+  <% end %>
+
+  <% if error %>
+    <p class="text-xs text-red-400 mb-2"><%= error %></p>
+  <% end %>
+
+  <%= form_with url: command_device_path(device), method: :post, class: "flex gap-2" do |f| %>
+    <%= f.text_field :message,
+          placeholder: "Ej: Iniciar el riego, abrir la puerta...",
+          autofocus: result.present?,
+          class: "flex-1 bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-amber-500" %>
+    <%= f.submit "→",
+          class: "px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold rounded-lg text-sm transition-colors cursor-pointer" %>
+  <% end %>
+</turbo-frame>

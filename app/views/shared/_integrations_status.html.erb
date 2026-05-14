@@ -1,0 +1,72 @@
+<%
+  providers = [
+    { name: "Groq",      env: "GROQ_API_KEY",      free_tier_url: "https://console.groq.com" },
+    { name: "Cerebras",  env: "CEREBRAS_API_KEY",  free_tier_url: "https://cloud.cerebras.ai" },
+    { name: "SambaNova", env: "SAMBANOVA_API_KEY", free_tier_url: "https://cloud.sambanova.ai" }
+  ]
+  ollama_count    = OllamaModels.installed.size
+  mqtt_url        = ENV["MQTT_URL"].to_s.strip
+  telegram_token  = ENV["TELEGRAM_BOT_TOKEN"].to_s.strip
+  telegram_chat   = ENV["TELEGRAM_CHAT_ID"].to_s.strip
+  configured      = providers.count { |p| ENV[p[:env]].to_s.strip.present? }
+%>
+
+<div class="bg-zinc-900 border border-zinc-800 rounded-xl p-5 mb-6">
+  <h2 class="text-amber-400 text-sm font-medium uppercase tracking-widest mb-3">Estado de integraciones</h2>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+    <%# Providers de IA %>
+    <div>
+      <p class="text-zinc-400 text-xs uppercase tracking-wider mb-2">Providers de IA cloud</p>
+      <ul class="space-y-1">
+        <% providers.each do |p| %>
+          <% present = ENV[p[:env]].to_s.strip.present? %>
+          <li class="flex items-center justify-between gap-2">
+            <span class="<%= present ? 'text-zinc-200' : 'text-zinc-500' %>">
+              <%= present ? "✓" : "✗" %> <%= p[:name] %>
+            </span>
+            <% unless present %>
+              <%= link_to "obtener key →", p[:free_tier_url], target: "_blank",
+                    class: "text-xs text-amber-500 hover:text-amber-400" %>
+            <% end %>
+          </li>
+        <% end %>
+        <li class="flex items-center justify-between gap-2 pt-1 border-t border-zinc-800 mt-1">
+          <span class="<%= ollama_count > 0 ? 'text-zinc-200' : 'text-zinc-500' %>">
+            <%= ollama_count > 0 ? "✓" : "✗" %> Ollama (local)
+          </span>
+          <span class="text-xs text-zinc-600">
+            <%= ollama_count > 0 ? "#{ollama_count} modelo#{'s' if ollama_count != 1}" : "no instalado" %>
+          </span>
+        </li>
+      </ul>
+      <% if configured.zero? && ollama_count.zero? %>
+        <p class="text-xs text-red-400 mt-2">⚠ No hay ningún provider configurado — Mikhael no puede responder.</p>
+      <% elsif configured == 1 %>
+        <p class="text-xs text-zinc-500 mt-2">💡 Solo tenés 1 provider cloud. Si te quedás sin rate limit, no hay fallback.</p>
+      <% end %>
+    </div>
+
+    <%# Integraciones %>
+    <div>
+      <p class="text-zinc-400 text-xs uppercase tracking-wider mb-2">Otras integraciones</p>
+      <ul class="space-y-1">
+        <li class="<%= mqtt_url.empty? ? 'text-zinc-500' : 'text-zinc-200' %>">
+          <%= mqtt_url.empty? ? "✗" : "✓" %> MQTT push
+          <% unless mqtt_url.empty? %>
+            <span class="text-xs text-zinc-600 ml-1"><%= mqtt_url %></span>
+          <% end %>
+        </li>
+        <li class="<%= (telegram_token.empty? || telegram_chat.empty?) ? 'text-zinc-500' : 'text-zinc-200' %>">
+          <%= (telegram_token.empty? || telegram_chat.empty?) ? "✗" : "✓" %> Telegram bot
+          <% unless telegram_token.empty? || telegram_chat.empty? %>
+            <span class="text-xs text-zinc-600 ml-1">chat <%= telegram_chat %></span>
+          <% end %>
+        </li>
+      </ul>
+      <p class="text-xs text-zinc-600 mt-2">
+        Configurá los que falten en <code class="text-amber-500">.env</code> y reiniciá el server.
+      </p>
+    </div>
+  </div>
+</div>

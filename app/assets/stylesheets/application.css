@@ -1,0 +1,24 @@
+/*
+ * This is a manifest file that'll be compiled into application.css.
+ *
+ * With Propshaft, assets are served efficiently without preprocessing steps. You can still include
+ * application-wide styles in this file, but keep in mind that CSS precedence will follow the standard
+ * cascading order, meaning styles declared later in the document or manifest will override earlier ones,
+ * depending on specificity.
+ *
+ * Consider organizing styles into separate files for maintainability.
+ */
+
+@keyframes sword-spin {
+  0%   { transform: rotate(0deg) scale(1);    filter: drop-shadow(0 0 4px #f97316); }
+  25%  { transform: rotate(90deg) scale(1.2); filter: drop-shadow(0 0 8px #fbbf24); }
+  50%  { transform: rotate(180deg) scale(1);  filter: drop-shadow(0 0 12px #ef4444); }
+  75%  { transform: rotate(270deg) scale(1.2); filter: drop-shadow(0 0 8px #fbbf24); }
+  100% { transform: rotate(360deg) scale(1);  filter: drop-shadow(0 0 4px #f97316); }
+}
+
+.fire-sword {
+  display: inline-block;
+  animation: sword-spin 1.2s linear infinite;
+  transform-origin: center;
+}

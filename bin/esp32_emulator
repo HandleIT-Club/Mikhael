@@ -1,0 +1,155 @@
+#!/usr/bin/env ruby
+# Emulador de microdispositivo — simula un ESP32 conectado a Mikhael via MQTT y HTTP.
+#
+# Uso:
+#   MQTT_URL=mqtt://localhost:1883 bin/esp32_emulator <device_id> [sensor|subscribe]
+#
+#   sensor    → envía datos de sensor al endpoint HTTP (modo reactivo)
+#   subscribe → suscribe al topic MQTT y espera comandos push (modo push)
+#   (sin arg) → modo interactivo: podés elegir
+
+require "mqtt"
+require "net/http"
+require "json"
+require "uri"
+
+MQTT_URL    = ENV.fetch("MQTT_URL", "mqtt://localhost:1883")
+MIKHAEL_URL = ENV.fetch("MIKHAEL_URL", "http://localhost:3000")
+DEVICE_ID   = ARGV[0] || abort("Uso: bin/esp32_emulator <device_id> [sensor|subscribe]")
+DEVICE_TOKEN = ENV["DEVICE_TOKEN"] || abort("Falta DEVICE_TOKEN — exportalo antes de correr el emulador.")
+MODE        = ARGV[1] || "interactive"
+
+TOPIC = "mikhael/devices/#{DEVICE_ID}/command"
+
+# ── Colores ────────────────────────────────────────────────────────────────────
+
+def green(s)  = "\e[32m#{s}\e[0m"
+def yellow(s) = "\e[33m#{s}\e[0m"
+def cyan(s)   = "\e[36m#{s}\e[0m"
+def red(s)    = "\e[31m#{s}\e[0m"
+def dim(s)    = "\e[2m#{s}\e[0m"
+def bold(s)   = "\e[1m#{s}\e[0m"
+
+# ── Acciones del "firmware" ────────────────────────────────────────────────────
+# En un ESP32 real esto mapearía a funciones de hardware (GPIO, servo, etc.)
+
+FIRMWARE_ACTIONS = {
+  # Riego
+  "open_valve"           => ->(value) { puts green("  [GPIO] Válvula ABIERTA") + dim(" · #{value} minutos") },
+  "close_valve"          => ->(_)     { puts green("  [GPIO] Válvula CERRADA") },
+  "schedule_irrigation"  => ->(value) { puts yellow("  [TIMER] Riego programado para: #{value}") },
+  "skip_irrigation"      => ->(_)     { puts dim("  [TIMER] Riego omitido") },
+  "alert_low_water"      => ->(_)     { puts red("  [ALERT] ⚠ Nivel de agua bajo — revisión manual requerida") },
+  # Cerradura
+  "unlock"               => ->(_)     { puts green("  [SERVO] Cerradura ABIERTA") },
+  "lock"                 => ->(_)     { puts green("  [SERVO] Cerradura CERRADA") },
+  "deny_access"          => ->(_)     { puts red("  [AUTH] Acceso DENEGADO") },
+  "alert_intrusion"      => ->(_)     { puts red("  [ALERT] 🚨 INTRUSIÓN detectada — enviando alerta") },
+  "request_verification" => ->(_)     { puts yellow("  [AUTH] Verificación adicional solicitada") }
+}.freeze
+
+def execute_action(payload_json)
+  data = JSON.parse(payload_json)
+  action = data["action"]
+  value  = data["value"]
+  reason = data["reason"]
+
+  puts
+  puts bold("  Comando recibido:")
+  puts cyan("  action: ") + bold(action.to_s)
+  puts cyan("  value:  ") + value.to_s if value
+  puts cyan("  reason: ") + dim(reason.to_s)
+
+  if data["requires_confirmation"]
+    puts yellow("  ⚠ Alta seguridad — requiere confirmación física en el dispositivo")
+    print "  ¿Confirmar ejecución? [s/N]: "
+    return puts(dim("  Cancelado.")) unless $stdin.gets&.chomp&.downcase == "s"
+  end
+
+  handler = FIRMWARE_ACTIONS[action]
+  if handler
+    puts
+    handler.call(value)
+    puts green("  ✓ Acción ejecutada.")
+  else
+    puts red("  ✗ Acción '#{action}' no implementada en este firmware.")
+  end
+rescue JSON::ParserError => e
+  puts red("  ✗ JSON inválido: #{e.message}")
+end
+
+# ── Modo reactivo: el ESP32 envía datos de sensor vía HTTP ────────────────────
+
+def sensor_mode
+  puts bold("\n╔══ MODO SENSOR (HTTP reactivo) ══════════════╗")
+  puts dim("  El dispositivo envía contexto y recibe una acción.\n")
+
+  print cyan("  Contexto / datos de sensor: ")
+  context = $stdin.gets&.chomp&.strip
+  return puts(red("  Contexto vacío.")) if context.nil? || context.empty?
+
+  puts dim("  Enviando a Mikhael...")
+
+  uri  = URI("#{MIKHAEL_URL}/api/v1/action")
+  http = Net::HTTP.new(uri.host, uri.port)
+  req  = Net::HTTP::Post.new(uri)
+  req["Authorization"] = "Bearer #{DEVICE_TOKEN}"
+  req["Content-Type"]  = "application/json"
+  req.body = { context: context }.to_json
+
+  res  = http.request(req)
+  body = JSON.parse(res.body)
+
+  if res.code.to_i == 200
+    puts green("  ✓ Respuesta de Mikhael:")
+    execute_action(res.body)
+  else
+    puts red("  ✗ Error #{res.code}: #{body['error']}")
+  end
+rescue Errno::ECONNREFUSED
+  puts red("  ✗ No se pudo conectar a Mikhael en #{MIKHAEL_URL}")
+end
+
+# ── Modo suscripción: el ESP32 espera comandos push vía MQTT ─────────────────
+
+def subscribe_mode
+  puts bold("\n╔══ MODO MQTT (push) ══════════════════════════╗")
+  puts dim("  Suscrito a: #{TOPIC}")
+  puts dim("  Esperando comandos desde Mikhael... (Ctrl+C para salir)\n")
+
+  MQTT::Client.connect(MQTT_URL) do |client|
+    client.subscribe(TOPIC)
+    client.get do |_topic, payload|
+      puts yellow("\n  ← Comando MQTT recibido [#{Time.now.strftime('%H:%M:%S')}]")
+      execute_action(payload)
+      puts dim("\n  Esperando próximo comando...")
+    end
+  end
+rescue MQTT::Exception, Errno::ECONNREFUSED => e
+  puts red("  ✗ MQTT error: #{e.message}")
+  puts dim("  ¿Está corriendo el broker? MQTT_URL=#{MQTT_URL}")
+rescue Interrupt
+  puts dim("\n  Desconectado.")
+end
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+puts bold("ESP32 Emulator · device_id: #{DEVICE_ID}")
+puts dim("  MQTT: #{MQTT_URL}  |  Mikhael: #{MIKHAEL_URL}\n")
+
+case MODE
+when "sensor"
+  sensor_mode
+when "subscribe"
+  subscribe_mode
+else
+  puts "  [1] Modo sensor   — enviar datos de sensor via HTTP"
+  puts "  [2] Modo MQTT     — suscribir y esperar comandos push"
+  print cyan("\n  Elegí (1/2): ")
+  choice = $stdin.gets&.chomp&.strip
+  case choice
+  when "1" then sensor_mode
+  when "2" then subscribe_mode
+  else puts red("  Opción inválida.")
+  end
+end
