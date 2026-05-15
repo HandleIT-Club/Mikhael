@@ -6,6 +6,10 @@ module Api
     class BaseController < ApplicationController
       protect_from_forgery with: :null_session
 
+      # Los controllers de API tienen su propia lógica de rate limiting por
+      # endpoint. Salteamos el límite web genérico heredado de ApplicationController.
+      skip_before_action :check_web_rate_limit
+
       rescue_from ActiveRecord::RecordNotFound do
         render json: { error: "No encontrado" }, status: :not_found
       end

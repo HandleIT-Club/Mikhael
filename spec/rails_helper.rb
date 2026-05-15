@@ -18,6 +18,10 @@ RSpec.configure do |config|
   config.filter_rails_from_backtrace!
 
   config.include FactoryBot::Syntax::Methods
+
+  # Limpiamos el store de rate limiting entre tests para que los contadores
+  # de un test no afecten al siguiente.
+  config.before { RATE_LIMIT_STORE.clear }
 end
 
 Shoulda::Matchers.configure do |config|
