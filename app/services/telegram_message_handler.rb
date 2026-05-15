@@ -8,7 +8,7 @@ class TelegramMessageHandler
     case text.strip
     when "/start"
       TelegramClient.send_message(
-        "👋 Soy *Mikhael*. Sé qué dispositivos tenés y los puedo comandar por vos. Hablame natural.\n\n" \
+        "👋 Soy *Mikhael*. Sé qué dispositivos tenés, los puedo comandar y puedo programarte recordatorios.\n\n" \
         "Comandos:\n" \
         "`/dispositivos` — listar devices\n" \
         "`/recordatorios` — ver recordatorios pendientes\n" \
@@ -25,51 +25,11 @@ class TelegramMessageHandler
       reset_conversation
       TelegramClient.send_message("✅ Conversación reiniciada.")
     else
-      handle_message(text)
+      handle_chat(text)
     end
   end
 
   private
-
-  # Antes de procesar como chat normal, evalúa si el mensaje es un recordatorio.
-  def handle_message(text)
-    detection = ReminderDetector.new.call(text)
-
-    if detection.success?
-      data = detection.value!
-
-      if data["is_reminder"] && data["scheduled_for"]
-        return handle_reminder_creation(data)
-      end
-
-      if data["needs_clarification"]
-        return TelegramClient.send_message(
-          "⏰ Entendí que querés programar algo, pero no pude determinar el momento exacto. " \
-          "¿Podés ser más específico? Ej: \"en 2 horas\", \"mañana a las 8am\"."
-        )
-      end
-    end
-
-    handle_chat(text)
-  end
-
-  def handle_reminder_creation(data)
-    reminder = Reminder.new(
-      scheduled_for: data["scheduled_for"],
-      message:       data["message"],
-      kind:          data["kind"],
-      device_id:     data["device_id"]
-    )
-
-    if reminder.save
-      ExecuteReminderJob.set(wait_until: reminder.scheduled_for).perform_later(reminder.id)
-      formatted = reminder.scheduled_for.strftime("%d/%m a las %H:%M")
-      TelegramClient.send_message("⏰ Recordatorio ##{reminder.id} programado para el *#{formatted}*:\n_#{reminder.message}_")
-    else
-      Rails.logger.error("TelegramMessageHandler: reminder inválido — #{reminder.errors.full_messages.join(', ')}")
-      TelegramClient.send_message("❌ No pude crear el recordatorio. Intentá de nuevo.")
-    end
-  end
 
   def handle_chat(text)
     conversation = find_or_create_conversation
@@ -88,16 +48,69 @@ class TelegramMessageHandler
     )
   end
 
+  # Despacha sobre el tool elegido por el AI. Una sola llamada al modelo;
+  # los recordatorios y los comandos a dispositivos viven en el mismo system prompt.
   def handle_ai_response(response, user_message)
     tool_call = ToolCallParser.parse(response.content)
+
+    if tool_call && tool_call["tool"] == "create_reminder"
+      return TelegramClient.send_message(create_reminder_from_tool(tool_call))
+    end
 
     if tool_call && (tool_call["device_id"].present? || tool_call["tool"] == "call_device")
       ai_context = tool_call["context"] || tool_call["message"]
       summary    = invoke_device(tool_call["device_id"], ai_context, user_message)
-      TelegramClient.send_message(summary)
-    else
-      TelegramClient.send_message(response.content)
+      return TelegramClient.send_message(summary)
     end
+
+    TelegramClient.send_message(response.content)
+  end
+
+  def create_reminder_from_tool(tool)
+    scheduled_for = parse_iso8601(tool["scheduled_for"])
+    return "❌ No pude programar el recordatorio: la hora no es válida. Probá ser más específico (ej: \"en 5 minutos\", \"mañana a las 8\")." if scheduled_for.nil?
+
+    if scheduled_for <= Time.current
+      return "❌ La hora del recordatorio ya pasó. Probá con un momento futuro."
+    end
+
+    kind     = tool["kind"].to_s.presence || "notify"
+    raw_did  = tool["device_id"].presence
+    fk_id    = nil
+
+    if kind == "query_device"
+      device = lookup_device(raw_did)
+      return "❌ No encontré el dispositivo `#{raw_did}` para programar el recordatorio." unless device
+      fk_id  = device.id
+    end
+
+    reminder = Reminder.new(
+      scheduled_for: scheduled_for,
+      message:       tool["message"].to_s.presence || "recordatorio",
+      kind:          kind,
+      device_id:     fk_id
+    )
+
+    if reminder.save
+      ExecuteReminderJob.set(wait_until: reminder.scheduled_for).perform_later(reminder.id)
+      formatted = reminder.scheduled_for.in_time_zone.strftime("%d/%m a las %H:%M")
+      "⏰ Recordatorio ##{reminder.id} programado para el *#{formatted}*:\n_#{reminder.message}_"
+    else
+      Rails.logger.error("create_reminder_from_tool: #{reminder.errors.full_messages.join(', ')}")
+      "❌ No pude programar el recordatorio: #{reminder.errors.full_messages.join(', ')}"
+    end
+  end
+
+  # El AI puede pasar el id_string ("esp32_riego") o, en el peor caso, el id numérico.
+  def lookup_device(value)
+    return nil if value.blank?
+    Device.find_by(device_id: value.to_s) || Device.find_by(id: value.to_i)
+  end
+
+  def parse_iso8601(str)
+    Time.zone.parse(str.to_s)
+  rescue ArgumentError, TypeError
+    nil
   end
 
   def invoke_device(device_id, ai_context, user_message)
@@ -143,7 +156,7 @@ class TelegramMessageHandler
     end
 
     lines = reminders.map do |r|
-      formatted = r.scheduled_for.strftime("%d/%m %H:%M")
+      formatted = r.scheduled_for.in_time_zone.strftime("%d/%m %H:%M")
       kind_tag  = r.query_device? ? " 📡" : ""
       "[#{r.id}] #{formatted}#{kind_tag} — #{r.message}"
     end
