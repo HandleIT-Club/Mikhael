@@ -20,7 +20,7 @@
     </div>
 
     <nav class="flex-1 overflow-y-auto px-2 space-y-1">
-      <% Conversation.recent.each do |conv| %>
+      <% Conversation.visible.recent.each do |conv| %>
         <%= render "conversations/conversation", conversation: conv, current: conv == @conversation %>
       <% end %>
     </nav>
