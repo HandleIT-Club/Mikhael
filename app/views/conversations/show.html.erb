@@ -1,4 +1,5 @@
 <% content_for :title, @conversation.title %>
+<%= turbo_stream_from "conversation_#{@conversation.id}" %>
 
 <div class="flex h-screen w-full" data-controller="chat">
   <%# Sidebar %>

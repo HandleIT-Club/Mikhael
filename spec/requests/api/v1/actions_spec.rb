@@ -22,6 +22,15 @@ RSpec.describe "Api::V1::Actions", type: :request do
 
   describe "POST /api/v1/action" do
     context "con token válido" do
+      it "usa #chat (nunca #stream) — DispatchAction no hace streaming" do
+        allow(mock_client).to receive(:stream)
+        post "/api/v1/action",
+             params: { context: "humedad: 20%" }.to_json,
+             headers: headers.merge(auth)
+        expect(mock_client).to have_received(:chat)
+        expect(mock_client).not_to have_received(:stream)
+      end
+
       it "devuelve la acción estructurada" do
         post "/api/v1/action",
              params: { context: "humedad: 20%" }.to_json,

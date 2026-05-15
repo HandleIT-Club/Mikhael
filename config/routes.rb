@@ -16,7 +16,9 @@ Rails.application.routes.draw do
   namespace :api do
     namespace :v1 do
       resources :conversations, only: %i[index show create destroy] do
-        resources :messages, only: %i[create]
+        resources :messages, only: %i[create] do
+          collection { post :stream, to: "api/v1/message_streams#create" }
+        end
       end
       resources :models,  only: %i[index]
       resources :devices, only: %i[index create update destroy] do
