@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_14_032103) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_15_034247) do
   create_table "conversations", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.boolean "hidden", default: false, null: false
@@ -25,6 +25,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_14_032103) do
     t.text "actions"
     t.datetime "created_at", null: false
     t.string "device_id", null: false
+    t.datetime "last_seen_at"
     t.string "name", null: false
     t.string "security_level", default: "normal", null: false
     t.text "system_prompt", default: "", null: false

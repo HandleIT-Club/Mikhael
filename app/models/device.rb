@@ -3,6 +3,7 @@
 # Licensed under AGPL-3.0 — https://www.gnu.org/licenses/agpl-3.0.html
 class Device < ApplicationRecord
   SECURITY_LEVELS = %w[normal high].freeze
+  ONLINE_THRESHOLD = 2.minutes
 
   validates :device_id,      presence: true, uniqueness: true
   validates :name,           presence: true
@@ -18,6 +19,14 @@ class Device < ApplicationRecord
 
   def high_security?
     security_level == "high"
+  end
+
+  def online?
+    last_seen_at.present? && last_seen_at >= ONLINE_THRESHOLD.ago
+  end
+
+  def touch_last_seen!
+    update_column(:last_seen_at, Time.current)
   end
 
   def regenerate_token!

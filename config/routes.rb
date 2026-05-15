@@ -25,7 +25,8 @@ Rails.application.routes.draw do
           post :command
         end
       end
-      resource :action,  only: %i[create]
+      resource :action,    only: %i[create]
+      resource :heartbeat, only: %i[create]
     end
   end
 
