@@ -56,7 +56,9 @@ class TelegramMessageHandler
     tool_call = ToolCallParser.parse(response.content)
 
     if tool_call && tool_call["tool"] == "create_reminder"
-      return TelegramClient.send_message(create_reminder_from_tool(tool_call, user_message))
+      msg = create_reminder_from_tool(tool_call, user_message)
+      send_to_telegram(msg)
+      return
     end
 
     if tool_call && (tool_call["device_id"].present? || tool_call["tool"] == "call_device")
@@ -71,10 +73,17 @@ class TelegramMessageHandler
     # lo hacemos nosotros directamente desde el input.
     if reminder_intent?(user_message)
       Rails.logger.warn("AI no llamó al tool create_reminder pero el user pidió recordatorio: #{user_message.inspect}. Activando fallback manual.")
-      return TelegramClient.send_message(create_reminder_from_user_message(user_message))
+      msg = create_reminder_from_user_message(user_message)
+      send_to_telegram(msg)
+      return
     end
 
     TelegramClient.send_message(response.content)
+  end
+
+  # nil = saltar el envío (caso típico: dedup silencioso).
+  def send_to_telegram(msg)
+    TelegramClient.send_message(msg) if msg.present?
   end
 
   def reminder_intent?(text)
@@ -103,8 +112,8 @@ class TelegramMessageHandler
   #      nos devuelve el mismo update otra vez.
   def persist_reminder(scheduled_for:, message:, kind:, device_id:)
     if (existing = recent_duplicate(message, scheduled_for))
-      Rails.logger.info("persist_reminder: duplicado dentro de 30s — devolviendo Reminder ##{existing.id}")
-      return format_confirmation(existing)
+      Rails.logger.info("persist_reminder: duplicado dentro de 30s de Reminder ##{existing.id} — saltando en silencio")
+      return nil  # nil = caller no manda nada a Telegram; el primer mensaje ya fue
     end
 
     reminder = Reminder.new(
