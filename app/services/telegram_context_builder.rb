@@ -80,10 +80,12 @@ class TelegramContextBuilder
     sample_id = devices.first&.device_id || "esp32_riego"
     second_id = devices.second&.device_id || sample_id
 
-    # Para el ejemplo de create_reminder usamos un ISO8601 real (no placeholder)
-    # así el modelo aprende el FORMATO exacto, no la sintaxis "<...>".
-    sample_reminder_time = "2026-01-15T14:30:00Z"
-
+    # NOTA: NO incluimos un ejemplo de create_reminder en el primer porque
+    # cualquier fecha hardcodeada acá ancla al modelo a ese mes/año (visto en
+    # producción: el primer con "2026-01-15" hizo que el modelo devolviera
+    # enero para "mañana" estando en mayo). Los ejemplos de create_reminder
+    # viven solo en el system prompt, donde se usan los timestamps de "FECHA
+    # Y HORA ACTUAL" del turno actual.
     [
       { role: "user",      content: "Hola Mikhael, ¿qué dispositivos tengo?" },
       { role: "assistant", content: "¡Hola! Soy Mikhael. Sí, #{device_summary}. Decime qué hacer con ellos." },
@@ -91,8 +93,6 @@ class TelegramContextBuilder
       { role: "assistant", content: %({"tool":"call_device","device_id":"#{sample_id}","context":"el usuario pide activar el dispositivo"}) },
       { role: "user",      content: "iniciá el otro dispositivo" },
       { role: "assistant", content: %({"tool":"call_device","device_id":"#{second_id}","context":"el usuario pide iniciar el dispositivo"}) },
-      { role: "user",      content: "recordame en 5 minutos cerrar la puerta" },
-      { role: "assistant", content: %({"tool":"create_reminder","scheduled_for":"#{sample_reminder_time}","message":"cerrar la puerta","kind":"notify","device_id":null}) },
       { role: "user",      content: "gracias" },
       { role: "assistant", content: "¡De nada! Cualquier cosa avisame." }
     ]

@@ -131,7 +131,7 @@ RSpec.describe TelegramMessageHandler do
       end
     end
 
-    context "scheduled_for en el pasado" do
+    context "scheduled_for en el pasado SIN señal en el mensaje del usuario" do
       let(:ai_content) do
         %({"tool":"create_reminder","scheduled_for":"#{1.hour.ago.utc.iso8601}","message":"x","kind":"notify","device_id":null})
       end
@@ -139,6 +139,22 @@ RSpec.describe TelegramMessageHandler do
       it "rechaza el recordatorio" do
         expect { handler.call("recordame algo") }.not_to change(Reminder, :count)
         expect(TelegramClient).to have_received(:send_message).with(/ya pasó/)
+      end
+    end
+
+    # Caso real visto en producción: usuario dice "mañana a las 15" estando en
+    # mayo, el AI devuelve enero (alucinado), pero el mensaje del usuario tiene
+    # la intención clara. Cubierto el caso simple "en X minutos".
+    context "AI alucina una fecha en el pasado PERO el user dijo 'en X minutos'" do
+      let(:ai_content) do
+        %({"tool":"create_reminder","scheduled_for":"2026-01-15T10:00:00Z","message":"ir a dormir","kind":"notify","device_id":null})
+      end
+
+      it "recupera la intención del mensaje del usuario" do
+        expect {
+          handler.call("recordame ir a dormir en 2 minutos")
+        }.to change(Reminder, :count).by(1)
+        expect(Reminder.last.scheduled_for).to be_within(1.minute).of(2.minutes.from_now)
       end
     end
 

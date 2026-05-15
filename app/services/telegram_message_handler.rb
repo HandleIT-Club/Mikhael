@@ -54,7 +54,7 @@ class TelegramMessageHandler
     tool_call = ToolCallParser.parse(response.content)
 
     if tool_call && tool_call["tool"] == "create_reminder"
-      return TelegramClient.send_message(create_reminder_from_tool(tool_call))
+      return TelegramClient.send_message(create_reminder_from_tool(tool_call, user_message))
     end
 
     if tool_call && (tool_call["device_id"].present? || tool_call["tool"] == "call_device")
@@ -66,14 +66,27 @@ class TelegramMessageHandler
     TelegramClient.send_message(response.content)
   end
 
-  def create_reminder_from_tool(tool)
-    Rails.logger.info("create_reminder tool call: #{tool.inspect}")
+  def create_reminder_from_tool(tool, user_message = nil)
+    Rails.logger.info("create_reminder tool call: #{tool.inspect}, user_msg=#{user_message.inspect}")
 
     raw_time      = tool["scheduled_for"].to_s
-    scheduled_for = parse_iso8601(raw_time) || parse_relative(raw_time, tool["message"].to_s)
+    scheduled_for = parse_iso8601(raw_time)
+
+    # Si el AI alucinó una fecha en el pasado o ilegible, la ÚNICA fuente de
+    # verdad confiable es el mensaje original del usuario. Visto en producción:
+    # usuario dice "mañana a las 15:00" en mayo y el AI devuelve enero (anclado
+    # a un ejemplo viejo del primer). Si la fecha del AI no sirve, intentamos
+    # extraer "en X minutos/horas" del input crudo del usuario.
+    if scheduled_for.nil? || scheduled_for <= Time.current
+      fallback = parse_relative(raw_time, tool["message"].to_s, user_message.to_s)
+      if fallback
+        Rails.logger.info("create_reminder: fallback al mensaje del usuario, scheduled_for=#{fallback}")
+        scheduled_for = fallback
+      end
+    end
 
     if scheduled_for.nil?
-      Rails.logger.warn("create_reminder: no pude parsear scheduled_for=#{raw_time.inspect}")
+      Rails.logger.warn("create_reminder: no pude parsear scheduled_for=#{raw_time.inspect} ni recuperar del user_msg")
       return "❌ No pude programar el recordatorio: no entendí la hora «#{raw_time}». Probá ser más específico (ej: \"en 5 minutos\", \"mañana a las 8\")."
     end
 
