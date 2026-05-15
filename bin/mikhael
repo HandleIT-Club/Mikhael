@@ -586,6 +586,65 @@ class Agent
   end
 
   def send_and_respond(content)
+    if @agent_mode
+      send_and_respond_blocking(content)
+    else
+      send_and_respond_streaming(content)
+    end
+  end
+
+  # Modo normal: streaming token a token.
+  def send_and_respond_streaming(content)
+    uri = URI("#{RAILS_URL}/api/v1/conversations/#{@conversation['id']}/messages/stream")
+    full_response = +""
+
+    print C.gold("Mikhael: ")
+    $stdout.flush
+
+    Net::HTTP.start(uri.host, uri.port, read_timeout: 120) do |http|
+      req = Net::HTTP::Post.new(uri, "Content-Type" => "application/json", "Accept" => "text/event-stream")
+      req.basic_auth("mikhael", APP_PASSWORD) unless APP_PASSWORD.empty?
+      req.body = { message: { content: content } }.to_json
+
+      http.request(req) do |response|
+        buffer = +""
+        response.read_body do |raw|
+          buffer << raw
+          while (newline = buffer.index("\n"))
+            line = buffer.slice!(0, newline + 1).strip
+            next unless line.start_with?("data: ")
+            data = JSON.parse(line.delete_prefix("data: ")) rescue next
+
+            if data["chunk"]
+              print data["chunk"]
+              $stdout.flush
+              full_response << data["chunk"]
+            elsif data["error"]
+              puts
+              puts C.red("Error: #{data['error']}")
+              return
+            elsif data["done"]
+              if data["model"] && data["model"] != @conversation["model_id"]
+                puts
+                puts C.yellow("  ↪ Modelo cambiado automáticamente a #{data['model']}")
+                @conversation["model_id"] = data["model"]
+              end
+            end
+          end
+        end
+      end
+    end
+
+    puts
+    puts
+  rescue Errno::ECONNREFUSED
+    puts C.red("\nError: No se puede conectar al servidor. ¿Está corriendo 'bin/dev'?")
+  rescue => e
+    puts C.red("\nError: #{e.message}")
+  end
+
+  # Modo agente: espera la respuesta completa para detectar bloques de código.
+  def send_and_respond_blocking(content)
     print C.gold("Mikhael (pensando...)\r")
     $stdout.flush
 
@@ -608,35 +667,33 @@ class Agent
       @conversation["model_id"] = result["model"]
     end
 
-    if @agent_mode
-      commands = CommandDetector.extract(response)
-      if commands.any?
-        outputs = {}
-        commands.each do |cmd|
-          output = CommandRunner.confirm_and_run(cmd, silent: true)
-          outputs[cmd] = output.strip if output && !output.strip.empty?
-        end
-
-        unless outputs.empty?
-          outputs.each do |cmd, out|
-            RailsClient.post(
-              "/api/v1/conversations/#{@conversation['id']}/messages",
-              { message: { content: "Salida del comando `#{cmd}`:\n```\n#{out}\n```" } }
-            )
-          end
-          print C.gold("Mikhael (analizando...)\r")
-          $stdout.flush
-          conclusion = RailsClient.post(
-            "/api/v1/conversations/#{@conversation['id']}/messages",
-            { message: { content: "Analizá la salida anterior y dame una conclusión breve." } }
-          )
-          print "\r" + " " * 35 + "\r"
-          puts
-          puts C.gold("Mikhael:") + " #{conclusion&.dig('content')}"
-          puts
-        end
-        return
+    commands = CommandDetector.extract(response)
+    if commands.any?
+      outputs = {}
+      commands.each do |cmd|
+        output = CommandRunner.confirm_and_run(cmd, silent: true)
+        outputs[cmd] = output.strip if output && !output.strip.empty?
       end
+
+      unless outputs.empty?
+        outputs.each do |cmd, out|
+          RailsClient.post(
+            "/api/v1/conversations/#{@conversation['id']}/messages",
+            { message: { content: "Salida del comando `#{cmd}`:\n```\n#{out}\n```" } }
+          )
+        end
+        print C.gold("Mikhael (analizando...)\r")
+        $stdout.flush
+        conclusion = RailsClient.post(
+          "/api/v1/conversations/#{@conversation['id']}/messages",
+          { message: { content: "Analizá la salida anterior y dame una conclusión breve." } }
+        )
+        print "\r" + " " * 35 + "\r"
+        puts
+        puts C.gold("Mikhael:") + " #{conclusion&.dig('content')}"
+        puts
+      end
+      return
     end
 
     puts

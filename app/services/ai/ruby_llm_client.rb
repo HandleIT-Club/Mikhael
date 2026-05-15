@@ -13,17 +13,7 @@ module Ai
     end
 
     def chat(messages:, model:)
-      llm_chat = RubyLLM.chat(model: model, provider: @llm_provider, assume_model_exists: true)
-
-      messages.each do |msg|
-        if msg[:role] == "system"
-          llm_chat.with_instructions(msg[:content])
-        else
-          llm_chat.add_message(role: msg[:role].to_sym, content: msg[:content])
-        end
-      end
-
-      build_response(llm_chat.complete.content, model, @our_provider)
+      build_response(build_llm_chat(messages, model).complete.content, model, @our_provider)
     rescue Errno::ECONNREFUSED
       Failure(@unavailable_failure)
     rescue RubyLLM::UnauthorizedError
@@ -33,6 +23,37 @@ module Ai
     rescue => e
       Rails.logger.error("#{self.class}(#{@our_provider}) error: #{e.message}")
       Failure(:ai_error)
+    end
+
+    def stream(messages:, model:, &block)
+      response = build_llm_chat(messages, model).complete do |chunk|
+        delta = chunk.content.to_s
+        block.call(delta) if delta.present? && block
+      end
+      build_response(response.content.to_s, model, @our_provider)
+    rescue Errno::ECONNREFUSED
+      Failure(@unavailable_failure)
+    rescue RubyLLM::UnauthorizedError
+      Failure(:invalid_api_key)
+    rescue RubyLLM::RateLimitError
+      Failure(:rate_limited)
+    rescue => e
+      Rails.logger.error("#{self.class}(#{@our_provider}) stream error: #{e.message}")
+      Failure(:ai_error)
+    end
+
+    private
+
+    def build_llm_chat(messages, model)
+      llm_chat = RubyLLM.chat(model: model, provider: @llm_provider, assume_model_exists: true)
+      messages.each do |msg|
+        if msg[:role] == "system"
+          llm_chat.with_instructions(msg[:content])
+        else
+          llm_chat.add_message(role: msg[:role].to_sym, content: msg[:content])
+        end
+      end
+      llm_chat
     end
   end
 end

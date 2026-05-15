@@ -4,10 +4,13 @@
 class CreateMessage
   include Dry::Monads[:result, :do]
 
-  def call(conversation:, content:, system_prompt: nil, primer: nil)
+  # on_chunk: Proc/lambda opcional — si se pasa, se usa streaming y se llama con cada delta (String).
+  #   Nota: NO usar &block porque dry-monads Do inyecta su propio proc interno como bloque de call.
+  # user_message: si ya fue guardado externamente (streaming web), se omite persist_user_message.
+  def call(conversation:, content:, system_prompt: nil, primer: nil, user_message: nil, on_chunk: nil)
     yield validate(conversation.id, content)
-    yield persist_user_message(conversation, content)
-    ai_response = yield dispatch(conversation, system_prompt, primer)
+    yield persist_user_message(conversation, content) unless user_message
+    ai_response = yield dispatch(conversation, system_prompt, primer, on_chunk)
     yield persist_assistant_message(conversation, ai_response)
 
     Success(ai_response)
@@ -26,12 +29,19 @@ class CreateMessage
 
   SKIPPABLE_FAILURES = %i[rate_limited invalid_api_key ai_error ollama_unavailable].freeze
 
-  def dispatch(conversation, system_prompt_override = nil, primer = nil)
-    messages = build_messages(conversation, system_prompt_override, primer)
+  # on_chunk: Proc o nil. Si es Proc, se usa streaming; si es nil, request/response normal.
+  # En caso de fallo durante streaming, reintenta sin streaming con el siguiente provider.
+  def dispatch(conversation, system_prompt_override = nil, primer = nil, on_chunk = nil)
+    messages         = build_messages(conversation, system_prompt_override, primer)
+    current_on_chunk = on_chunk
 
     loop do
       client = Ai::Dispatcher.for(conversation.provider)
-      result = client.chat(messages: messages, model: conversation.model_id)
+      result = if current_on_chunk
+        client.stream(messages: messages, model: conversation.model_id, &current_on_chunk)
+      else
+        client.chat(messages: messages, model: conversation.model_id)
+      end
 
       return result unless result.failure? && SKIPPABLE_FAILURES.include?(result.failure)
 
@@ -40,6 +50,7 @@ class CreateMessage
       return Failure(:all_models_exhausted) unless next_model
 
       conversation.update!(model_id: next_model)
+      current_on_chunk = nil  # fallback sin streaming — mejor respuesta completa que streaming roto
     end
   end
 

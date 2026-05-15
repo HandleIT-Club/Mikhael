@@ -9,6 +9,14 @@ module Ai
       raise NotImplementedError, "#{self.class} must implement #chat"
     end
 
+    # Streaming variant — yields String deltas to the block.
+    # Returns Success(AiResponse) with the full accumulated content when done,
+    # or Failure(symbol) on error (same failure values as #chat).
+    # Subclasses that don't override this fall back to a non-streaming #chat call.
+    def stream(messages:, model:, &block)
+      chat(messages: messages, model: model)
+    end
+
     private
 
     def build_response(content, model, provider)
