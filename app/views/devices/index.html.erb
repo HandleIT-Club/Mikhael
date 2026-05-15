@@ -52,13 +52,9 @@
                 <p class="text-xs text-zinc-500 mt-0.5 font-mono"><%= device.device_id %></p>
               </div>
 
-              <%= button_to device_path(device), method: :delete,
-                    class: "p-1.5 rounded text-zinc-600 hover:text-red-400 transition-colors",
-                    data: { turbo_confirm: "¿Eliminar #{device.name}?" } do %>
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                </svg>
-              <% end %>
+              <%= button_to "Eliminar", device_path(device), method: :delete,
+                    class: "text-xs px-3 py-1.5 rounded-lg border border-red-500/40 text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer",
+                    data: { turbo_confirm: "¿Eliminar #{device.name}? Esta acción no se puede deshacer." } %>
             </div>
 
             <%# Token (solo se muestra recién creado o regenerado) %>
