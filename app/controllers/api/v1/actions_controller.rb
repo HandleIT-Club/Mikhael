@@ -5,6 +5,18 @@ module Api
   module V1
     class ActionsController < BaseController
       skip_before_action :require_app_password
+
+      # Rate limit por token: cada dispositivo tiene su propio contador.
+      # Corre antes de authenticate_device para proteger también contra tokens inválidos.
+      rate_limit to:     ENV.fetch("RATE_LIMIT_ACTION_PER_MIN", "60").to_i,
+                 within: 1.minute,
+                 by:     -> { request.headers["Authorization"].to_s.delete_prefix("Bearer ") },
+                 with:   -> {
+                   token = request.headers["Authorization"].to_s.delete_prefix("Bearer ")
+                   render_rate_limit_exceeded(30, identifier: token)
+                 },
+                 store:  RATE_LIMIT_STORE
+
       before_action :authenticate_device
 
       def create

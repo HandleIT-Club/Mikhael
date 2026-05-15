@@ -21,7 +21,7 @@ fallback automático entre proveedores, o **completamente offline** con Ollama.
 ![Hotwire](https://img.shields.io/badge/Hotwire-Turbo-8b5cf6?style=flat-square)
 ![Telegram](https://img.shields.io/badge/Telegram-Bot-26A5E4?style=flat-square&logo=telegram&logoColor=white)
 ![MQTT](https://img.shields.io/badge/MQTT-IoT-660066?style=flat-square)
-![Tests](https://img.shields.io/badge/Tests-68%20passing-22c55e?style=flat-square)
+![Tests](https://img.shields.io/badge/Tests-99%20passing-22c55e?style=flat-square)
 ![License](https://img.shields.io/badge/Licencia-AGPL--3.0-blue?style=flat-square)
 
 </div>
@@ -812,6 +812,32 @@ exigen HTTP Basic Auth con usuario `mikhael` y la password configurada.
 usando el AI con el system prompt y las acciones configuradas del dispositivo. Si `MQTT_URL`
 está activo, también publica el resultado al topic `mikhael/devices/<device_id>/command`.
 
+### Rate Limits
+
+Todos los endpoints tienen rate limiting nativo (Rails 8 `rate_limit` con `MemoryStore`).
+Las respuestas 429 incluyen `Retry-After` (segundos) y body:
+
+```json
+{ "error": "rate_limit_exceeded", "retry_after": 30 }
+```
+
+| Endpoint | Límite | Por |
+|----------|--------|-----|
+| `POST /api/v1/action` | 60 req/min | Token de dispositivo |
+| `POST /api/v1/conversations/:id/messages` | 30 req/min | IP |
+| `POST /api/v1/conversations/:id/messages/stream` | 30 req/min | IP |
+| `POST /api/v1/devices/:id/command` | 30 req/min | IP |
+| Rutas web | 100 req/min | IP |
+| Telegram polling | Sin límite | — (interno) |
+
+Variables de entorno para ajustar los límites:
+
+| Variable | Default | Aplica a |
+|----------|---------|----------|
+| `RATE_LIMIT_ACTION_PER_MIN` | `60` | `POST /api/v1/action` |
+| `RATE_LIMIT_MESSAGES_PER_MIN` | `30` | Messages, stream, device command |
+| `RATE_LIMIT_WEB_PER_MIN` | `100` | Rutas web |
+
 ---
 
 ## Seguridad
@@ -827,6 +853,8 @@ que cubrimos por defecto:
 - ✅ Tokens **solo se muestran al crear o regenerar** — no se exponen en listados
 - ✅ Endpoint de action protegido por Bearer token con `secure_compare`
 - ✅ Bot de Telegram **solo procesa mensajes del `TELEGRAM_CHAT_ID` configurado** — el resto se ignora
+- ✅ **Rate limiting** nativo por endpoint con `Retry-After` — ver sección [Rate Limits](#rate-limits)
+- ✅ Logs de rate limit incluyen solo los primeros 8 chars del identificador (nunca el token completo)
 - ✅ Brakeman: 0 warnings en escaneo de seguridad
 
 ### Trusted sources — confirmación física inteligente
@@ -866,8 +894,6 @@ Con eso:
 
 ### Lo que NO está cubierto
 
-- ❌ **Rate limiting** — un cliente con un token válido puede mandar miles de requests.
-  Si esto te importa, ponelo detrás de un reverse proxy (Caddy, nginx) con throttling.
 - ❌ **Multi-usuario** — Mikhael asume un usuario. Si querés varios usuarios con sus
   propias conversaciones, vas a tener que agregar un modelo `User` y particionar todo.
 
@@ -938,8 +964,8 @@ app/
 bundle exec rspec
 ```
 
-**68 ejemplos** cubriendo modelos, operations, controllers web, API JSON, auth básica
-opcional, dispatcher, OllamaModels, y endpoint de actions con tokens.
+**99 ejemplos** cubriendo modelos, operations, controllers web, API JSON, auth básica
+opcional, dispatcher, OllamaModels, endpoint de actions con tokens, streaming, y rate limiting.
 
 ```bash
 bundle exec brakeman    # análisis estático de seguridad — debería pasar con 0 warnings
@@ -951,11 +977,9 @@ bundle exec brakeman    # análisis estático de seguridad — debería pasar co
 
 | Idea | Notas |
 |------|-------|
-| Rate limiting (Rails 8 `rate_limit`) | Imprescindible para exposición pública seria |
 | Multi-usuario | Modelo `User`, sesiones, particionar todo por usuario |
 | Recordatorios programados desde Telegram | "Avisame en 2 horas que X". Requiere migrar a function calling nativo de Groq para confiabilidad |
 | Bridge BLE | Daemon Python que traduce GATT ↔ HTTP local |
-| Streaming de respuestas | Hoy es request/response; con Turbo Streams + SSE se puede streamear |
 | Memoria entre conversaciones | Embeddings + recuperación contextual |
 | Whisper local | Entrada por voz desde el CLI o devices |
 | Bot Telegram multi-usuario | Cada `chat_id` con su propia conversación |

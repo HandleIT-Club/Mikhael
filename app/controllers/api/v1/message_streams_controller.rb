@@ -12,6 +12,13 @@ module Api
     class MessageStreamsController < BaseController
       include ActionController::Live
 
+      rate_limit to:     ENV.fetch("RATE_LIMIT_MESSAGES_PER_MIN", "30").to_i,
+                 within: 1.minute,
+                 by:     -> { request.remote_ip },
+                 with:   -> { render_rate_limit_exceeded(30, identifier: request.remote_ip) },
+                 store:  RATE_LIMIT_STORE,
+                 only:   :create
+
       before_action :set_conversation
 
       def create
