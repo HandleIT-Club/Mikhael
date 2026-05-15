@@ -70,8 +70,9 @@ class TelegramContextBuilder
     return "El usuario aún no tiene dispositivos registrados." if devices.empty?
 
     lines = devices.map do |d|
+      status  = d.online? ? "🟢 online" : "🔴 offline"
       actions = d.actions_list.any? ? d.actions_list.join(", ") : "(sin acciones definidas)"
-      "- `#{d.device_id}` (#{d.name}, seguridad #{d.security_level}): #{actions}"
+      "- `#{d.device_id}` (#{d.name}, #{status}, seguridad #{d.security_level}): #{actions}"
     end
     "Dispositivos del usuario:\n#{lines.join("\n")}"
   end

@@ -66,6 +66,8 @@ module Api
           system_prompt:  device.system_prompt,
           security_level: device.security_level,
           actions:        device.actions_list,
+          online:         device.online?,
+          last_seen_at:   device.last_seen_at,
           created_at:     device.created_at
         }
         data[:token] = device.token if expose_token

@@ -49,4 +49,29 @@ RSpec.describe Device, type: :model do
       expect(build(:device)).not_to be_high_security
     end
   end
+
+  describe "#online?" do
+    it "devuelve true si last_seen_at es reciente" do
+      device = build(:device, last_seen_at: 1.minute.ago)
+      expect(device).to be_online
+    end
+
+    it "devuelve false si last_seen_at supera el umbral" do
+      device = build(:device, last_seen_at: 10.minutes.ago)
+      expect(device).not_to be_online
+    end
+
+    it "devuelve false si nunca reportó" do
+      device = build(:device, last_seen_at: nil)
+      expect(device).not_to be_online
+    end
+  end
+
+  describe "#touch_last_seen!" do
+    it "actualiza last_seen_at a Time.current" do
+      device = create(:device)
+      expect { device.touch_last_seen! }.to change { device.reload.last_seen_at }
+      expect(device.last_seen_at).to be_within(2.seconds).of(Time.current)
+    end
+  end
 end

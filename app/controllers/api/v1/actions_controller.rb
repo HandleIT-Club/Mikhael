@@ -11,6 +11,7 @@ module Api
         context = params[:context].to_s.strip
         return render json: { error: "context es requerido" }, status: :unprocessable_entity if context.blank?
 
+        @device.touch_last_seen!
         result = DispatchAction.new.call(device: @device, context: context)
 
         result.either(
