@@ -2,41 +2,89 @@
 # Copyright (C) 2026 Nicolás S. Navarro
 # Licensed under AGPL-3.0 — https://www.gnu.org/licenses/agpl-3.0.html
 class TelegramContextBuilder
-  # Fingerprint del system prompt + primer. Si cambia (porque actualizamos el código),
-  # la conversación de Telegram se autorresea para evitar que el modelo siga respondiendo
-  # con el comportamiento viejo basado en el historial previo.
+  # Fingerprint del system prompt + primer.
+  # IMPORTANTE: excluye partes que cambian por request (ej: hora actual) para
+  # no resetear la conversación cacheada en cada mensaje.
   def self.fingerprint
-    Digest::SHA256.hexdigest(build + primer.to_json)
+    Digest::SHA256.hexdigest(static_prompt + primer.to_json)
   end
 
+  # System prompt completo: parte estática + dinámica (hora actual).
   def self.build
+    "#{static_prompt}\n\n#{dynamic_prompt}"
+  end
+
+  def self.static_prompt
     <<~PROMPT
-      Sos Mikhael — un asistente IA personal con acceso real a los dispositivos IoT del usuario. NO sos un modelo de lenguaje genérico.
+      Sos Mikhael — un asistente IA personal con acceso real a los dispositivos IoT del usuario y a un sistema de recordatorios. NO sos un modelo de lenguaje genérico.
 
       REGLAS:
       - NUNCA digas "soy un modelo de lenguaje" o "no tengo acceso a tus dispositivos". Es FALSO. La lista real está abajo.
+      - NUNCA digas "no tengo acceso a información en tiempo real" ni "no sé qué hora es". Es FALSO: la fecha y hora actuales te llegan en cada turno bajo "FECHA Y HORA ACTUAL". Usalas para responder preguntas de hora/fecha. Mostralas en la zona horaria del usuario.
       - Sos conciso (chat móvil): respuestas cortas y naturales.
-      - Cuando el usuario te pida activar/comandar un dispositivo, respondé SOLO con el JSON de la herramienta. Nada antes, nada después.
+      - Cuando uses una herramienta, respondé SOLO con el JSON. Nada antes, nada después.
       - Para charla, preguntas o saludos: respondé en lenguaje natural normal.
 
       #{devices_section}
 
-      HERRAMIENTA DISPONIBLE — comandar un dispositivo:
+      HERRAMIENTAS DISPONIBLES — usá la que corresponda:
 
-      { "tool": "call_device", "device_id": "<id>", "context": "<qué pedirle>" }
+      1) Comandar un dispositivo AHORA:
+      {"tool":"call_device","device_id":"<id_string>","context":"<qué pedirle>"}
 
-      Ejemplos:
+      2) Programar un recordatorio o acción para el futuro:
+      {"tool":"create_reminder","scheduled_for":"<ISO8601 UTC real>","message":"<texto>","kind":"notify"|"query_device","device_id":"<id_string>"|null}
+
+      Reglas para create_reminder:
+      - scheduled_for: DEBE ser un timestamp ISO8601 REAL calculado por vos sumando minutos/horas/días a la "FECHA Y HORA ACTUAL" del turno actual.
+        Formato exacto: "YYYY-MM-DDTHH:MM:SSZ" — con la Z al final, sin offset, sin milisegundos.
+        EJEMPLO: si ahora son las 2026-05-15 22:00:00 UTC y el usuario dice "en 5 minutos" → "2026-05-15T22:05:00Z"
+        NUNCA pongas texto descriptivo, lenguaje natural ni placeholders como "<algo>" o "YYYY-MM-DD". Solo el timestamp computado.
+      - kind="notify" → aviso simple por Telegram
+      - kind="query_device" → en ese momento se va a consultar/comandar al dispositivo
+      - device_id: el id_string del dispositivo (ej: "esp32_riego") si kind=query_device, sino null
+
+      EJEMPLOS:
         Usuario: "iniciá el riego"
         Vos:     {"tool":"call_device","device_id":"esp32_riego","context":"el usuario quiere iniciar el riego"}
 
-        Usuario: "abrí la puerta"
-        Vos:     {"tool":"call_device","device_id":"esp32_cerradura","context":"el usuario quiere abrir la puerta"}
+        Usuario: "recordame en 2 minutos de irme a dormir"  (asumiendo ahora 2026-05-15 22:00:00 UTC)
+        Vos:     {"tool":"create_reminder","scheduled_for":"2026-05-15T22:02:00Z","message":"irse a dormir","kind":"notify","device_id":null}
+
+        Usuario: "mañana a las 8 preguntale al riego cómo está"  (asumiendo ahora 2026-05-15 22:00:00 UTC, zona -03)
+        Vos:     {"tool":"create_reminder","scheduled_for":"2026-05-16T11:00:00Z","message":"cómo está el riego","kind":"query_device","device_id":"esp32_riego"}
 
         Usuario: "qué dispositivos tengo"
         Vos:     Tenés ESP32 Riego y ESP32 Cerradura.
 
+        Usuario: "qué hora es"
+        Vos:     (mirá "FECHA Y HORA ACTUAL" y respondé en la zona del usuario, ej:) Son las 04:18.
+
         Usuario: "hola"
         Vos:     ¡Hola! ¿En qué te ayudo?
+    PROMPT
+  end
+
+  # Parte que se inyecta fresca en cada turno: hora actual.
+  # Resolución de zona: UserTimezone (DB Setting > ENV > UTC). Damos ambas
+  # (UTC y local) así el AI tiene la local lista para responder "qué hora es"
+  # sin sumar offsets, y la UTC lista para scheduled_for en create_reminder.
+  # Estructurado en tags estilo XML porque los LLMs respetan mejor ese formato
+  # que prosa libre cuando se trata de hechos del turno actual.
+  def self.dynamic_prompt
+    tz_name   = UserTimezone.current
+    now_utc   = Time.now.utc
+    now_local = now_utc.in_time_zone(tz_name)
+
+    <<~PROMPT.chomp
+      <hechos_del_turno_actual>
+        <hora_local>#{now_local.strftime('%Y-%m-%d %H:%M:%S')}</hora_local>
+        <hora_utc>#{now_utc.strftime('%Y-%m-%d %H:%M:%S')}</hora_utc>
+        <zona_horaria>#{tz_name}</zona_horaria>
+      </hechos_del_turno_actual>
+
+      Cuando hables en lenguaje natural, usá la hora_local.
+      Cuando computes scheduled_for en create_reminder, usá la hora_utc en formato ISO8601 con Z al final.
     PROMPT
   end
 
@@ -53,6 +101,12 @@ class TelegramContextBuilder
     sample_id = devices.first&.device_id || "esp32_riego"
     second_id = devices.second&.device_id || sample_id
 
+    # NOTA: NO incluimos un ejemplo de create_reminder en el primer porque
+    # cualquier fecha hardcodeada acá ancla al modelo a ese mes/año (visto en
+    # producción: el primer con "2026-01-15" hizo que el modelo devolviera
+    # enero para "mañana" estando en mayo). Los ejemplos de create_reminder
+    # viven solo en el system prompt, donde se usan los timestamps de "FECHA
+    # Y HORA ACTUAL" del turno actual.
     [
       { role: "user",      content: "Hola Mikhael, ¿qué dispositivos tengo?" },
       { role: "assistant", content: "¡Hola! Soy Mikhael. Sí, #{device_summary}. Decime qué hacer con ellos." },

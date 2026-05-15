@@ -9,7 +9,7 @@
     <%= javascript_importmap_tags %>
   </head>
 
-  <body class="h-full bg-zinc-950 text-zinc-100 antialiased">
+  <body class="h-full bg-zinc-950 text-zinc-100 antialiased" data-controller="timezone">
     <div id="flash" class="fixed top-4 right-4 z-50 space-y-2 max-w-sm">
       <% if notice %>
         <%= render "shared/flash", type: :notice, message: notice %>

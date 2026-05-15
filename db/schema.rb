@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_15_034247) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_15_071158) do
   create_table "conversations", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.boolean "hidden", default: false, null: false
@@ -52,6 +52,26 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_15_034247) do
     t.text "system_prompt", default: "", null: false
     t.datetime "updated_at", null: false
     t.index ["model_id"], name: "index_model_configs_on_model_id", unique: true
+  end
+
+  create_table "reminders", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.integer "device_id"
+    t.datetime "executed_at"
+    t.string "kind", default: "notify", null: false
+    t.text "message", null: false
+    t.datetime "scheduled_for", null: false
+    t.datetime "updated_at", null: false
+    t.index ["executed_at"], name: "index_reminders_on_executed_at"
+    t.index ["scheduled_for"], name: "index_reminders_on_scheduled_for"
+  end
+
+  create_table "settings", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "key", null: false
+    t.datetime "updated_at", null: false
+    t.text "value"
+    t.index ["key"], name: "index_settings_on_key", unique: true
   end
 
   add_foreign_key "messages", "conversations"

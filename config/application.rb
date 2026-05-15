@@ -33,7 +33,10 @@ module Mikhael
     # These settings can be overridden in specific environments using the files
     # in config/environments, which are processed later.
     #
-    # config.time_zone = "Central Time (US & Canada)"
+    # Zona horaria de la app. Resolución en runtime via UserTimezone (DB
+    # Setting > ENV MIKHAEL_TZ > UTC). Acá solo ponemos el fallback inicial;
+    # cuando el browser detecta la zona la guarda en Setting y se aplica.
+    config.time_zone = ENV.fetch("MIKHAEL_TZ", "UTC")
     # config.eager_load_paths << Rails.root.join("extras")
 
     # Don't generate system test files.

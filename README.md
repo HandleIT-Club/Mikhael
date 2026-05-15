@@ -21,7 +21,7 @@ fallback automático entre proveedores, o **completamente offline** con Ollama.
 ![Hotwire](https://img.shields.io/badge/Hotwire-Turbo-8b5cf6?style=flat-square)
 ![Telegram](https://img.shields.io/badge/Telegram-Bot-26A5E4?style=flat-square&logo=telegram&logoColor=white)
 ![MQTT](https://img.shields.io/badge/MQTT-IoT-660066?style=flat-square)
-![Tests](https://img.shields.io/badge/Tests-99%20passing-22c55e?style=flat-square)
+![Tests](https://img.shields.io/badge/Tests-167%20passing-22c55e?style=flat-square)
 ![License](https://img.shields.io/badge/Licencia-AGPL--3.0-blue?style=flat-square)
 
 </div>
@@ -732,14 +732,20 @@ Telegram polling iniciado.
 Abrí Telegram, andá a tu bot y mandale:
 
 ```
-/start          → Mikhael te saluda y te explica
-/dispositivos   → Lista los devices que tenés cargados
-/reset          → Borra la conversación y empieza fresca
+/start                     → Mikhael te saluda y te explica
+/dispositivos              → Lista los devices que tenés cargados
+/recordatorios             → Ver los próximos 10 recordatorios pendientes
+/borrar_recordatorio <id>  → Cancela un recordatorio
+/zona <nombre>             → Configura tu zona horaria (ej: /zona Buenos Aires)
+/reset                     → Borra la conversación y empieza fresca
 
 (o hablale natural)
 "qué dispositivos tengo"
 "iniciá el riego"
 "abrí la cerradura"
+"qué hora es"
+"recordame en 2 horas revisar el riego"
+"mañana a las 8 preguntale al ESP32 del riego cómo está"
 "hola, cómo va?"
 ```
 
@@ -785,6 +791,72 @@ La conversación de Telegram se autorresea cuando cambia el system prompt (por u
 con cambios al bot, por ejemplo). No te tenés que acordar de mandar `/reset` después de
 actualizar — Mikhael lo nota solo y arranca con la conversación fresca.
 
+### Recordatorios programados
+
+Mikhael entiende lenguaje natural para programar recordatorios y acciones diferidas:
+
+```
+"recordame en 5 minutos llamar al doctor"
+"avisame en 2 horas revisar el riego"
+"recordame mañana a las 8 sacar la basura"
+"en 30 minutos preguntale al ESP32 del riego cómo está la humedad"
+```
+
+Dos tipos:
+
+| `kind` | Qué hace |
+|--------|----------|
+| `notify` | Te manda un mensaje a Telegram con el texto del recordatorio |
+| `query_device` | En ese momento llama al device (DispatchAction) y te manda el resultado a Telegram |
+
+**Arquitectura:** los recordatorios son un *tool* del chat AI (`create_reminder`), igual
+que `call_device`. Una sola llamada al modelo decide qué hacer. Si el AI no usa el tool
+correctamente (alucina la fecha o se rinde y responde chat text), un fallback determinístico
+extrae el "cuándo" y el "qué" del mensaje original del usuario y crea el recordatorio igual.
+
+**Persistencia y ejecución:** los recordatorios viven en SQLite (tabla `reminders`) y se
+ejecutan vía `ExecuteReminderJob` encolado en Solid Queue con `wait_until`. El job es
+idempotente (no se ejecuta dos veces si `executed_at` ya está seteado) y tolerante a
+dispositivos borrados.
+
+**Defensa contra duplicados:** si el mismo pedido llega dos veces en < 30 segundos
+(usuario impaciente, restart del server que reenvía updates viejos de Telegram, etc.),
+solo se crea un Reminder. La segunda confirmación se omite en silencio.
+
+**Gestión:**
+
+```
+/recordatorios              → próximos 10 pendientes
+/borrar_recordatorio 3      → cancela el #3
+```
+
+### Zona horaria
+
+Mikhael necesita saber tu zona para interpretar correctamente "mañana a las 8" y para
+mostrar horas locales en las confirmaciones. Resolución en tres niveles (prioridad):
+
+1. **Setting persistido en la app** — autodetectado por el browser la primera vez que
+   abrís la web (Stimulus controller lee `Intl.DateTimeFormat().resolvedOptions().timeZone`
+   y lo guarda vía `PATCH /timezone`). También se setea con el comando `/zona` desde Telegram.
+2. **ENV `MIKHAEL_TZ`** — fallback para deployments sin browser (Telegram only / CLI only).
+3. **UTC** — último recurso.
+
+Desde Telegram:
+
+```
+/zona Buenos Aires           → setea zona con nombre amigable
+/zona America/New_York       → o con nombre IANA completo
+/zona                        → muestra la zona actual y de dónde viene
+```
+
+Si preguntás "qué hora es" y la zona no está configurada, Mikhael te responde la hora
+en UTC con un hint sugiriendo el comando `/zona` para arreglarlo.
+
+> 💡 **Nota técnica:** `Time.zone` en Rails es per-thread. El `TelegramPollJob` corre en
+> un thread distinto al request del browser, así que Mikhael resuelve siempre vía
+> `UserTimezone.current` (que lee del DB Setting) en vez de confiar en `Time.zone`.
+> Funciona uniforme entre web, CLI y Telegram.
+
 ---
 
 ## Referencia de API
@@ -803,6 +875,7 @@ DELETE /api/v1/devices/:id                         # eliminar
 POST   /api/v1/devices/:id/regenerate_token        # invalida el viejo, devuelve nuevo
 POST   /api/v1/devices/:id/command                 # comando en lenguaje natural → acción + MQTT push
 POST   /api/v1/action                              # endpoint para microdispositivos (auth por token)
+PATCH  /timezone                                   # browser reporta su zona (Stimulus auto-detect)
 ```
 
 Si `MIKHAEL_PASSWORD` está seteado, todas las rutas anteriores **excepto `/api/v1/action`**
@@ -917,18 +990,26 @@ app/
 │   ├── messages_controller.rb          # Web (Turbo Stream)
 │   ├── devices_controller.rb           # Web (gestión de microdispositivos)
 │   ├── model_configs_controller.rb     # Web (system prompts por modelo)
+│   ├── timezone_controller.rb          # Recibe TZ autodetectada del browser (Stimulus)
 │   └── api/v1/
 │       ├── conversations_controller.rb
 │       ├── messages_controller.rb
+│       ├── message_streams_controller.rb  # SSE para streaming al CLI
 │       ├── models_controller.rb        # GET — lista de modelos disponibles
 │       ├── devices_controller.rb       # CRUD + regenerate_token
 │       └── actions_controller.rb       # POST — endpoint para microdispositivos
+├── jobs/
+│   ├── telegram_poll_job.rb            # Long-polling de Telegram (offset persistido en Setting)
+│   └── execute_reminder_job.rb         # Dispara recordatorios, idempotente, encolado con wait_until
 ├── operations/
 │   ├── create_message.rb               # Pipeline: validar → guardar user → AI → guardar assistant
 │   └── dispatch_action.rb              # AI con retry y output JSON estructurado
 ├── services/
 │   ├── model_selector.rb               # Tiers, fallback chain, cooldown por rate limit
 │   ├── ollama_models.rb                # Cache 60s de /api/tags
+│   ├── telegram_message_handler.rb     # Comandos, fast-path "qué hora es", fallback de recordatorios
+│   ├── telegram_context_builder.rb     # System prompt + primer + hora actual inyectada cada turno
+│   ├── user_timezone.rb                # Resolución TZ: Setting > ENV > UTC
 │   └── ai/
 │       ├── dispatcher.rb               # Resuelve provider → client
 │       ├── base_client.rb
@@ -940,7 +1021,9 @@ app/
 │   ├── conversation.rb                 # provider derivado de model_id
 │   ├── message.rb
 │   ├── model_config.rb                 # system prompt por modelo, auto-crea defaults
-│   └── device.rb                       # token 256-bit, security_level
+│   ├── device.rb                       # token 256-bit, security_level
+│   ├── reminder.rb                     # scheduled_for, message, kind (notify|query_device)
+│   └── setting.rb                      # key/value persistente (TZ del user, offset de Telegram, etc)
 └── values/
     └── ai_response.rb                  # Data.define(:content, :model, :provider)
 ```
@@ -955,6 +1038,23 @@ app/
   se persiste el default. No hace falta correr `db:seed` cada vez que se agrega un modelo.
 - **Output JSON robusto para devices**: `DispatchAction` reintenta hasta 6 veces con
   modelos distintos si el LLM devuelve JSON malformado o no respeta el esquema.
+- **Recordatorios como tool, no como detector aparte**: `create_reminder` vive en el
+  mismo system prompt que `call_device`. Una llamada AI por mensaje. Los LLMs son
+  confiables eligiendo entre tools (para lo que están entrenados) y malos haciendo
+  meta-clasificación de intent.
+- **Fallback determinístico cuando el AI falla**: si el modelo no usa el tool, o devuelve
+  una fecha alucinada en el pasado, o se rinde y responde chat text, una regex sobre el
+  mensaje original del usuario rescata la intención. No dependemos de que el AI haga lo
+  correcto.
+- **Hora actual en cada turno via XML tags**: el `dynamic_prompt` inyecta hora UTC + local
+  cada request. Estructurado con tags `<hechos_del_turno_actual>` que los LLMs respetan
+  mejor que prosa libre.
+- **TZ persistida en DB, no en `Time.zone`**: `Time.zone` es per-thread y se pierde entre
+  el request del browser y el TelegramPollJob. `UserTimezone` lee siempre del DB
+  (`Setting` > ENV > UTC) así funciona uniforme entre superficies.
+- **Offset del polling persistente**: el `TelegramPollJob` guarda el offset en `Setting`
+  (DB) en vez de `Rails.cache` (memoria volátil en dev). Reinicios del server ya no
+  re-procesan mensajes viejos.
 
 ---
 
@@ -964,8 +1064,11 @@ app/
 bundle exec rspec
 ```
 
-**99 ejemplos** cubriendo modelos, operations, controllers web, API JSON, auth básica
-opcional, dispatcher, OllamaModels, endpoint de actions con tokens, streaming, y rate limiting.
+**167 ejemplos** cubriendo modelos, operations, controllers web, API JSON, auth básica
+opcional, dispatcher, OllamaModels, endpoint de actions con tokens, streaming, rate limiting,
+recordatorios programados (tool `create_reminder` + `ExecuteReminderJob` con Solid Queue),
+fallback determinístico cuando el AI no usa el tool, dedup de duplicados, y resolución
+multi-fuente de zona horaria (`UserTimezone` con Setting > ENV > UTC).
 
 ```bash
 bundle exec brakeman    # análisis estático de seguridad — debería pasar con 0 warnings
@@ -978,7 +1081,6 @@ bundle exec brakeman    # análisis estático de seguridad — debería pasar co
 | Idea | Notas |
 |------|-------|
 | Multi-usuario | Modelo `User`, sesiones, particionar todo por usuario |
-| Recordatorios programados desde Telegram | "Avisame en 2 horas que X". Requiere migrar a function calling nativo de Groq para confiabilidad |
 | Bridge BLE | Daemon Python que traduce GATT ↔ HTTP local |
 | Memoria entre conversaciones | Embeddings + recuperación contextual |
 | Whisper local | Entrada por voz desde el CLI o devices |

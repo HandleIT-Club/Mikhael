@@ -14,10 +14,20 @@ class MessagesController < ApplicationController
     user_msg = @conversation.messages.create!(role: "user", content: content)
     cable_append partial: "messages/message", locals: { message: user_msg }
 
-    # 2. Mostrar placeholder de streaming (con cursor parpadeante).
+    # 2. Interceptor compartido con Telegram: preguntas con respuesta determinística
+    # (hora, etc.) se responden desde Rails, sin tocar el AI. Evita que el modelo
+    # alucine "no tengo acceso a info en tiempo real" cuando sí la tenemos.
+    if (intercepted = MessageIntentRouter.intercept(content))
+      assistant_msg = @conversation.messages.create!(role: "assistant", content: intercepted.assistant_persist)
+      cable_append partial: "messages/message", locals: { message: assistant_msg }
+      maybe_generate_title
+      return head :ok
+    end
+
+    # 3. Mostrar placeholder de streaming (con cursor parpadeante).
     cable_append partial: "messages/streaming_placeholder"
 
-    # 3. Streaming: cada chunk actualiza el texto del placeholder en el browser.
+    # 4. Streaming: cada chunk actualiza el texto del placeholder en el browser.
     buffer = +""
     result = CreateMessage.new.call(
       conversation: @conversation,
@@ -26,7 +36,7 @@ class MessagesController < ApplicationController
       on_chunk:     ->(chunk) { buffer << chunk; cable_broadcast_chunk(buffer) }
     )
 
-    # 4. Reemplazar el placeholder con el mensaje final (renderizado con Markdown).
+    # 5. Reemplazar el placeholder con el mensaje final (renderizado con Markdown).
     @conversation.reload
     @model_switched = @conversation.model_id != original_model
 
