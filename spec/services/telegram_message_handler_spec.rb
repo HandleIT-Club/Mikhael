@@ -287,6 +287,50 @@ RSpec.describe TelegramMessageHandler do
     end
   end
 
+  describe "comando /zona" do
+    it "setea la zona del usuario con nombre amigable" do
+      handler.call("/zona Buenos Aires")
+      expect(Setting.get("user_timezone")).to eq("Buenos Aires")
+      expect(TelegramClient).to have_received(:send_message).with(/configurada/i)
+    end
+
+    it "acepta nombres IANA completos" do
+      handler.call("/zona Europe/Madrid")
+      expect(Setting.get("user_timezone")).to eq("Europe/Madrid")
+    end
+
+    it "rechaza zonas inválidas con un mensaje útil" do
+      handler.call("/zona Nada/Inventada")
+      expect(Setting.get("user_timezone")).to be_nil
+      expect(TelegramClient).to have_received(:send_message).with(/Zona desconocida/i)
+    end
+
+    it "/zona sin argumentos muestra la zona actual y la fuente" do
+      Setting.set("user_timezone", "Madrid")
+      handler.call("/zona")
+      expect(TelegramClient).to have_received(:send_message).with(/Zona actual: \*Madrid\*/)
+    end
+  end
+
+  describe "hint cuando la zona no está configurada" do
+    it "answer_time agrega un mensaje sugiriendo /zona si está en UTC sin config" do
+      Setting.where(key: "user_timezone").delete_all
+      ENV.delete("MIKHAEL_TZ")
+      sent = []
+      allow(TelegramClient).to receive(:send_message) { |m| sent << m }
+      handler.call("qué hora es")
+      expect(sent.join("\n")).to match(/\/zona Buenos Aires/)
+    end
+
+    it "NO agrega el hint si la zona está seteada" do
+      Setting.set("user_timezone", "America/Argentina/Buenos_Aires")
+      sent = []
+      allow(TelegramClient).to receive(:send_message) { |m| sent << m }
+      handler.call("qué hora es")
+      expect(sent.join("\n")).not_to match(/\/zona/)
+    end
+  end
+
   describe "comando /recordatorios" do
     it "lista los recordatorios pendientes" do
       create(:reminder, message: "uno", scheduled_for: 1.hour.from_now)

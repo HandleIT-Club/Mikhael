@@ -22,6 +22,7 @@ class TelegramMessageHandler
         "`/dispositivos` — listar devices\n" \
         "`/recordatorios` — ver recordatorios pendientes\n" \
         "`/borrar_recordatorio <id>` — cancelar un recordatorio\n" \
+        "`/zona <nombre>` — configurar zona horaria (ej: `/zona Buenos Aires`)\n" \
         "`/reset` — empezar de cero"
       )
     when "/dispositivos"
@@ -30,6 +31,10 @@ class TelegramMessageHandler
       list_reminders
     when /\A\/borrar_recordatorio\s+(\d+)\z/
       delete_reminder(Regexp.last_match(1).to_i)
+    when /\A\/zona\s+(.+)\z/i
+      set_timezone(Regexp.last_match(1).strip)
+    when "/zona"
+      show_current_zone
     when "/reset"
       reset_conversation
       TelegramClient.send_message("✅ Conversación reiniciada.")
@@ -287,7 +292,39 @@ class TelegramMessageHandler
     now_local = Time.now.in_time_zone(tz_name)
     formatted = now_local.strftime("%H:%M")
     date      = now_local.strftime("%d/%m/%Y")
-    TelegramClient.send_message("🕐 Son las *#{formatted}* — #{date} (#{tz_name})")
+
+    msg = "🕐 Son las *#{formatted}* — #{date} (#{tz_name})"
+    msg += "\n\n_Tu zona horaria no está configurada. Mandame_ `/zona Buenos Aires` _(o la tuya) para arreglarlo._" if tz_name == "UTC" && !timezone_explicitly_set?
+    TelegramClient.send_message(msg)
+  end
+
+  def timezone_explicitly_set?
+    Setting.get(UserTimezone::SETTING_KEY).present? || ENV["MIKHAEL_TZ"].present?
+  end
+
+  def set_timezone(name)
+    if UserTimezone.set(name)
+      TelegramClient.send_message("✅ Zona horaria configurada: *#{name}*. Probá ahora: \"qué hora es\".")
+    else
+      TelegramClient.send_message(
+        "❌ Zona desconocida: «#{name}».\n\n" \
+        "Probá con un nombre amigable (`Buenos Aires`, `Madrid`, `Mexico City`, `Bogota`) " \
+        "o el nombre IANA completo (`America/New_York`, `Europe/London`)."
+      )
+    end
+  end
+
+  def show_current_zone
+    tz = UserTimezone.current
+    source =
+      if Setting.get(UserTimezone::SETTING_KEY).present?
+        "guardada en la app"
+      elsif ENV["MIKHAEL_TZ"].present?
+        "del ENV MIKHAEL_TZ"
+      else
+        "por defecto (UTC)"
+      end
+    TelegramClient.send_message("Zona actual: *#{tz}* (#{source}).\nCambiala con `/zona <nombre>`.")
   end
 
   def list_devices
