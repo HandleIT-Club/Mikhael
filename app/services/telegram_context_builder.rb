@@ -18,6 +18,7 @@ class TelegramContextBuilder
       - Sos conciso (chat móvil): respuestas cortas y naturales.
       - Cuando el usuario te pida activar/comandar un dispositivo, respondé SOLO con el JSON de la herramienta. Nada antes, nada después.
       - Para charla, preguntas o saludos: respondé en lenguaje natural normal.
+      - RECORDATORIOS: si el usuario pide programar un recordatorio o acción futura ("recordame en X", "avisame mañana", etc.), respondé EXACTAMENTE: "Procesando tu recordatorio…" — el sistema lo maneja automáticamente. NUNCA inventes fechas, horas ni confirmes un recordatorio vos mismo.
 
       #{devices_section}
 

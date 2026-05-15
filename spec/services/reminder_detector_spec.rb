@@ -118,5 +118,39 @@ RSpec.describe ReminderDetector do
         expect(result.failure).to eq(:invalid_json)
       end
     end
+
+    context "cuando el AI embebe el JSON dentro de texto extra" do
+      before do
+        json_in_text = %(Aquí el análisis: {"is_reminder":true,"scheduled_for":"#{2.minutes.from_now.utc.iso8601}","message":"irse a dormir","kind":"notify","device_id":null} Eso es todo.)
+        allow(mock_client).to receive(:chat).and_return(
+          Dry::Monads::Success(AiResponse.new(content: json_in_text, model: "m", provider: "p"))
+        )
+      end
+
+      it "extrae el JSON correctamente y detecta el recordatorio" do
+        result = detector.call("Recordame en 2 minutos de irme a dormir")
+        expect(result).to be_success
+        expect(result.value!["is_reminder"]).to be true
+        expect(result.value!["scheduled_for"]).to be_a(Time)
+      end
+    end
+
+    context "cuando el AI devuelve scheduled_for en formato no parseable" do
+      before do
+        stub_ai(
+          "is_reminder"   => true,
+          "scheduled_for" => "en dos minutos",   # lenguaje natural, no ISO8601
+          "message"       => "dormir",
+          "kind"          => "notify",
+          "device_id"     => nil
+        )
+      end
+
+      it "lo trata como needs_clarification en vez de caer al chat" do
+        result = detector.call("Recordame en 2 minutos de irme a dormir")
+        expect(result).to be_success
+        expect(result.value!["needs_clarification"]).to be true
+      end
+    end
   end
 end
