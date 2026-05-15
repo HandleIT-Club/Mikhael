@@ -21,7 +21,7 @@ fallback automático entre proveedores, o **completamente offline** con Ollama.
 ![Hotwire](https://img.shields.io/badge/Hotwire-Turbo-8b5cf6?style=flat-square)
 ![Telegram](https://img.shields.io/badge/Telegram-Bot-26A5E4?style=flat-square&logo=telegram&logoColor=white)
 ![MQTT](https://img.shields.io/badge/MQTT-IoT-660066?style=flat-square)
-![Tests](https://img.shields.io/badge/Tests-99%20passing-22c55e?style=flat-square)
+![Tests](https://img.shields.io/badge/Tests-120%20passing-22c55e?style=flat-square)
 ![License](https://img.shields.io/badge/Licencia-AGPL--3.0-blue?style=flat-square)
 
 </div>
@@ -732,14 +732,18 @@ Telegram polling iniciado.
 Abrí Telegram, andá a tu bot y mandale:
 
 ```
-/start          → Mikhael te saluda y te explica
-/dispositivos   → Lista los devices que tenés cargados
-/reset          → Borra la conversación y empieza fresca
+/start                     → Mikhael te saluda y te explica
+/dispositivos              → Lista los devices que tenés cargados
+/recordatorios             → Ver los próximos 10 recordatorios pendientes
+/borrar_recordatorio <id>  → Cancela un recordatorio
+/reset                     → Borra la conversación y empieza fresca
 
 (o hablale natural)
 "qué dispositivos tengo"
 "iniciá el riego"
 "abrí la cerradura"
+"recordame en 2 horas revisar el riego"
+"mañana a las 8 preguntale al ESP32 del riego cómo está"
 "hola, cómo va?"
 ```
 
@@ -964,8 +968,9 @@ app/
 bundle exec rspec
 ```
 
-**99 ejemplos** cubriendo modelos, operations, controllers web, API JSON, auth básica
-opcional, dispatcher, OllamaModels, endpoint de actions con tokens, streaming, y rate limiting.
+**120 ejemplos** cubriendo modelos, operations, controllers web, API JSON, auth básica
+opcional, dispatcher, OllamaModels, endpoint de actions con tokens, streaming, rate limiting,
+detección de recordatorios con AI, y ejecución de jobs con Solid Queue.
 
 ```bash
 bundle exec brakeman    # análisis estático de seguridad — debería pasar con 0 warnings
@@ -978,7 +983,6 @@ bundle exec brakeman    # análisis estático de seguridad — debería pasar co
 | Idea | Notas |
 |------|-------|
 | Multi-usuario | Modelo `User`, sesiones, particionar todo por usuario |
-| Recordatorios programados desde Telegram | "Avisame en 2 horas que X". Requiere migrar a function calling nativo de Groq para confiabilidad |
 | Bridge BLE | Daemon Python que traduce GATT ↔ HTTP local |
 | Memoria entre conversaciones | Embeddings + recuperación contextual |
 | Whisper local | Entrada por voz desde el CLI o devices |

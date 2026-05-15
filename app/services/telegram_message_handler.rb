@@ -7,18 +7,69 @@ class TelegramMessageHandler
   def call(text)
     case text.strip
     when "/start"
-      TelegramClient.send_message("👋 Soy *Mikhael*. Sé qué dispositivos tenés y los puedo comandar por vos. Hablame natural.\n\nComandos:\n`/dispositivos` — listar devices\n`/reset` — empezar de cero")
+      TelegramClient.send_message(
+        "👋 Soy *Mikhael*. Sé qué dispositivos tenés y los puedo comandar por vos. Hablame natural.\n\n" \
+        "Comandos:\n" \
+        "`/dispositivos` — listar devices\n" \
+        "`/recordatorios` — ver recordatorios pendientes\n" \
+        "`/borrar_recordatorio <id>` — cancelar un recordatorio\n" \
+        "`/reset` — empezar de cero"
+      )
     when "/dispositivos"
       list_devices
+    when "/recordatorios"
+      list_reminders
+    when /\A\/borrar_recordatorio\s+(\d+)\z/
+      delete_reminder(Regexp.last_match(1).to_i)
     when "/reset"
       reset_conversation
       TelegramClient.send_message("✅ Conversación reiniciada.")
     else
-      handle_chat(text)
+      handle_message(text)
     end
   end
 
   private
+
+  # Antes de procesar como chat normal, evalúa si el mensaje es un recordatorio.
+  def handle_message(text)
+    detection = ReminderDetector.new.call(text)
+
+    if detection.success?
+      data = detection.value!
+
+      if data["is_reminder"] && data["scheduled_for"]
+        return handle_reminder_creation(data)
+      end
+
+      if data["needs_clarification"]
+        return TelegramClient.send_message(
+          "⏰ Entendí que querés programar algo, pero no pude determinar el momento exacto. " \
+          "¿Podés ser más específico? Ej: \"en 2 horas\", \"mañana a las 8am\"."
+        )
+      end
+    end
+
+    handle_chat(text)
+  end
+
+  def handle_reminder_creation(data)
+    reminder = Reminder.new(
+      scheduled_for: data["scheduled_for"],
+      message:       data["message"],
+      kind:          data["kind"],
+      device_id:     data["device_id"]
+    )
+
+    if reminder.save
+      ExecuteReminderJob.set(wait_until: reminder.scheduled_for).perform_later(reminder.id)
+      formatted = reminder.scheduled_for.strftime("%d/%m a las %H:%M")
+      TelegramClient.send_message("⏰ Recordatorio ##{reminder.id} programado para el *#{formatted}*:\n_#{reminder.message}_")
+    else
+      Rails.logger.error("TelegramMessageHandler: reminder inválido — #{reminder.errors.full_messages.join(', ')}")
+      TelegramClient.send_message("❌ No pude crear el recordatorio. Intentá de nuevo.")
+    end
+  end
 
   def handle_chat(text)
     conversation = find_or_create_conversation
@@ -81,6 +132,35 @@ class TelegramMessageHandler
       "• *#{d.name}* (`#{d.device_id}`)#{actions}"
     end
     TelegramClient.send_message("*Dispositivos:*\n#{lines.join("\n")}\n\nDecime qué hacer con ellos.")
+  end
+
+  def list_reminders
+    reminders = Reminder.upcoming.limit(10)
+
+    if reminders.empty?
+      TelegramClient.send_message("No hay recordatorios pendientes.")
+      return
+    end
+
+    lines = reminders.map do |r|
+      formatted = r.scheduled_for.strftime("%d/%m %H:%M")
+      kind_tag  = r.query_device? ? " 📡" : ""
+      "[#{r.id}] #{formatted}#{kind_tag} — #{r.message}"
+    end
+    TelegramClient.send_message("📋 *Recordatorios pendientes:*\n#{lines.join("\n")}\n\n_Usá /borrar\\_recordatorio <id> para cancelar uno._")
+  end
+
+  def delete_reminder(id)
+    reminder = Reminder.find_by(id: id)
+
+    if reminder.nil?
+      TelegramClient.send_message("❌ No existe el recordatorio ##{id}.")
+    elsif reminder.executed_at.present?
+      TelegramClient.send_message("❌ El recordatorio ##{id} ya fue ejecutado y no se puede cancelar.")
+    else
+      reminder.destroy!
+      TelegramClient.send_message("✅ Recordatorio ##{id} cancelado.")
+    end
   end
 
   def reset_conversation
