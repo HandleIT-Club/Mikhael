@@ -249,17 +249,15 @@ RSpec.describe TelegramMessageHandler do
     end
   end
 
-  describe "pregunta de hora (fast-path determinístico)" do
+  describe "pregunta de hora (fast-path via MessageIntentRouter)" do
     [
       "qué hora es",
-      "Qué hora es",
-      "qué hora es?",
-      "que hora es Mikhael",
-      "Qué hora tenemos?",
-      "hora?",
-      "what time is it"
+      "Qué hora es Mikhael?",
+      "Sabes qué hora es Mikhael?",
+      "podés decirme la hora?",
+      "tenés hora?"
     ].each do |question|
-      it "responde directamente a '#{question}' sin pasar por el AI" do
+      it "responde a '#{question}' sin pasar por el AI" do
         sent = []
         allow(TelegramClient).to receive(:send_message) { |msg| sent << msg }
         handler.call(question)
@@ -269,21 +267,12 @@ RSpec.describe TelegramMessageHandler do
       end
     end
 
-    it "NO se activa para 'qué hora cierra la farmacia' (no es pregunta de hora actual)" do
+    it "NO intercepta 'qué hora cierra la farmacia' — sigue al AI" do
       sent = []
       allow(TelegramClient).to receive(:send_message) { |msg| sent << msg }
       handler.call("qué hora cierra la farmacia")
+      expect(mock_client).to have_received(:chat)
       expect(sent.join("\n")).not_to match(/Son las\s*\*?\d{2}:\d{2}/)
-    end
-
-    it "usa UserTimezone aunque Time.zone del thread esté en UTC (caso real del poll job)" do
-      Setting.set("user_timezone", "America/Argentina/Buenos_Aires")
-      Time.use_zone("UTC") do  # simula el thread del poll job
-        sent = []
-        allow(TelegramClient).to receive(:send_message) { |msg| sent << msg }
-        handler.call("qué hora es")
-        expect(sent.join("\n")).to include("Buenos_Aires").or include("-03").or match(/\(America/)
-      end
     end
   end
 
@@ -312,24 +301,6 @@ RSpec.describe TelegramMessageHandler do
     end
   end
 
-  describe "hint cuando la zona no está configurada" do
-    it "answer_time agrega un mensaje sugiriendo /zona si está en UTC sin config" do
-      Setting.where(key: "user_timezone").delete_all
-      ENV.delete("MIKHAEL_TZ")
-      sent = []
-      allow(TelegramClient).to receive(:send_message) { |m| sent << m }
-      handler.call("qué hora es")
-      expect(sent.join("\n")).to match(/\/zona Buenos Aires/)
-    end
-
-    it "NO agrega el hint si la zona está seteada" do
-      Setting.set("user_timezone", "America/Argentina/Buenos_Aires")
-      sent = []
-      allow(TelegramClient).to receive(:send_message) { |m| sent << m }
-      handler.call("qué hora es")
-      expect(sent.join("\n")).not_to match(/\/zona/)
-    end
-  end
 
   describe "comando /recordatorios" do
     it "lista los recordatorios pendientes" do

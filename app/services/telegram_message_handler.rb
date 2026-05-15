@@ -4,17 +4,9 @@
 class TelegramMessageHandler
   CONV_CACHE_KEY  = "telegram_conversation_id".freeze
 
-  # Preguntas de hora que respondemos directamente desde Ruby — el chat AI
-  # tiene una tendencia entrenada a contestar "no tengo acceso a info en
-  # tiempo real" aun cuando le pasamos la hora en el system prompt. Mejor
-  # determinístico para esto.
-  # Matchea preguntas de hora con o sin vocativo ("qué hora es Mikhael?", "hora?",
-  # "what time is it"). NO matchea "qué hora cierra la farmacia" porque exigimos
-  # que después de "hora" venga un verbo de existencia (es/son/tenemos) o fin.
-  TIME_QUESTION_RE = /\A\s*(qu[eé]\s+hora\s+(es|son|tenemos)\b|\Ahora\s*\??\z|what\s+time\s+is\s+it\b).{0,30}\z/i
-
   def call(text)
-    case text.strip
+    stripped = text.strip
+    case stripped
     when "/start"
       TelegramClient.send_message(
         "👋 Soy *Mikhael*. Sé qué dispositivos tenés, los puedo comandar y puedo programarte recordatorios.\n\n" \
@@ -38,10 +30,14 @@ class TelegramMessageHandler
     when "/reset"
       reset_conversation
       TelegramClient.send_message("✅ Conversación reiniciada.")
-    when TIME_QUESTION_RE
-      answer_time
     else
-      handle_chat(text)
+      # Antes de pasar al AI, ver si MessageIntentRouter tiene una respuesta
+      # determinística (ej: "qué hora es", "sabés qué hora es", "tenés hora").
+      # Misma lógica se usa desde el MessagesController web.
+      intercepted = MessageIntentRouter.intercept(stripped)
+      return TelegramClient.send_message(intercepted.reply) if intercepted
+
+      handle_chat(stripped)
     end
   end
 
@@ -281,25 +277,6 @@ class TelegramMessageHandler
       },
       ->(_) { "❌ No se pudo comandar #{device.name}." }
     )
-  end
-
-  def answer_time
-    # IMPORTANTE: NO usar Time.current acá. Time.zone es per-thread; el
-    # TelegramPollJob corre en un thread distinto al que setea la zona desde
-    # el browser, así que Time.current quedaría en UTC. Resolvemos siempre
-    # desde UserTimezone.current y convertimos explícito.
-    tz_name   = UserTimezone.current
-    now_local = Time.now.in_time_zone(tz_name)
-    formatted = now_local.strftime("%H:%M")
-    date      = now_local.strftime("%d/%m/%Y")
-
-    msg = "🕐 Son las *#{formatted}* — #{date} (#{tz_name})"
-    msg += "\n\n_Tu zona horaria no está configurada. Mandame_ `/zona Buenos Aires` _(o la tuya) para arreglarlo._" if tz_name == "UTC" && !timezone_explicitly_set?
-    TelegramClient.send_message(msg)
-  end
-
-  def timezone_explicitly_set?
-    Setting.get(UserTimezone::SETTING_KEY).present? || ENV["MIKHAEL_TZ"].present?
   end
 
   def set_timezone(name)
