@@ -76,6 +76,39 @@ RSpec.describe TelegramMessageHandler do
       end
     end
 
+    context "scheduled_for sin prefijo ('5 minutos desde ahora')" do
+      let(:ai_content) do
+        %({"tool":"create_reminder","scheduled_for":"5 minutos desde ahora","message":"dormir","kind":"notify","device_id":null})
+      end
+
+      it "captura el número+unidad sin importar palabras alrededor" do
+        expect { handler.call("recordame algo") }.to change(Reminder, :count).by(1)
+        expect(Reminder.last.scheduled_for).to be_within(1.minute).of(5.minutes.from_now)
+      end
+    end
+
+    context "scheduled_for en inglés ('in 2 hours')" do
+      let(:ai_content) do
+        %({"tool":"create_reminder","scheduled_for":"in 2 hours","message":"x","kind":"notify","device_id":null})
+      end
+
+      it "también lo parsea" do
+        expect { handler.call("remind me in 2 hours") }.to change(Reminder, :count).by(1)
+        expect(Reminder.last.scheduled_for).to be_within(1.minute).of(2.hours.from_now)
+      end
+    end
+
+    context "scheduled_for vacío pero el message tiene la hora" do
+      let(:ai_content) do
+        %({"tool":"create_reminder","scheduled_for":"","message":"en 10 minutos cerrar la puerta","kind":"notify","device_id":null})
+      end
+
+      it "lo extrae del message como fallback" do
+        expect { handler.call("recordame cerrar la puerta") }.to change(Reminder, :count).by(1)
+        expect(Reminder.last.scheduled_for).to be_within(1.minute).of(10.minutes.from_now)
+      end
+    end
+
     context "AI devuelve el placeholder literal 'YYYY-MM-DD...'" do
       let(:ai_content) do
         %({"tool":"create_reminder","scheduled_for":"YYYY-MM-DDTHH:MM:SSZ","message":"x","kind":"notify","device_id":null})
@@ -87,14 +120,14 @@ RSpec.describe TelegramMessageHandler do
       end
     end
 
-    context "AI devuelve un placeholder estilo '<UTC ahora+5min>'" do
+    context "AI devuelve un placeholder con número embebido ('<UTC ahora+5min>')" do
       let(:ai_content) do
         %({"tool":"create_reminder","scheduled_for":"<UTC ahora+5min>","message":"x","kind":"notify","device_id":null})
       end
 
-      it "rechaza el placeholder con < >" do
-        expect { handler.call("recordame algo") }.not_to change(Reminder, :count)
-        expect(TelegramClient).to have_received(:send_message).with(/no entendí la hora/)
+      it "extrae el 5min del placeholder y honra la intención del usuario" do
+        expect { handler.call("recordame algo en 5 minutos") }.to change(Reminder, :count).by(1)
+        expect(Reminder.last.scheduled_for).to be_within(1.minute).of(5.minutes.from_now)
       end
     end
 
