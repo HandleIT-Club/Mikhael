@@ -67,8 +67,15 @@ class TelegramMessageHandler
   end
 
   def create_reminder_from_tool(tool)
-    scheduled_for = parse_iso8601(tool["scheduled_for"])
-    return "❌ No pude programar el recordatorio: la hora no es válida. Probá ser más específico (ej: \"en 5 minutos\", \"mañana a las 8\")." if scheduled_for.nil?
+    Rails.logger.info("create_reminder tool call: #{tool.inspect}")
+
+    raw_time      = tool["scheduled_for"].to_s
+    scheduled_for = parse_iso8601(raw_time) || parse_relative(raw_time, tool["message"].to_s)
+
+    if scheduled_for.nil?
+      Rails.logger.warn("create_reminder: no pude parsear scheduled_for=#{raw_time.inspect}")
+      return "❌ No pude programar el recordatorio: no entendí la hora «#{raw_time}». Probá ser más específico (ej: \"en 5 minutos\", \"mañana a las 8\")."
+    end
 
     if scheduled_for <= Time.current
       return "❌ La hora del recordatorio ya pasó. Probá con un momento futuro."
@@ -108,8 +115,31 @@ class TelegramMessageHandler
   end
 
   def parse_iso8601(str)
-    Time.zone.parse(str.to_s)
-  rescue ArgumentError, TypeError
+    return nil if str.blank?
+    return nil if str.include?("<") || str.include?(">")    # rechazá placeholders del prompt
+    return nil if str.match?(/\b(YYYY|MM|DD|HH|SS)\b/)      # rechazá la plantilla literal
+    Time.zone.parse(str)
+  rescue ArgumentError, TypeError, Date::Error
+    nil
+  end
+
+  # Fallback cuando el AI no respetó el formato ISO8601 y devolvió algo como
+  # "en 5 minutos" o "en 2 horas". Mejor cinturón y tirantes que dejarlo morir.
+  # Si el campo `scheduled_for` no tiene info útil, revisamos `message` también
+  # (algunos modelos meten la expresión temporal ahí).
+  def parse_relative(*strings)
+    strings.each do |str|
+      next if str.blank?
+      next unless (m = str.match(/en\s+(\d+)\s*(minutos?|min|horas?|hs?|d[ií]as?)/i))
+
+      n    = m[1].to_i
+      unit = m[2].downcase
+      case unit
+      when /\Amin/   then return n.minutes.from_now
+      when /\Ah/     then return n.hours.from_now
+      when /\Ad/     then return n.days.from_now
+      end
+    end
     nil
   end
 

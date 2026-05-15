@@ -54,14 +54,47 @@ RSpec.describe TelegramMessageHandler do
       end
     end
 
-    context "scheduled_for inválido" do
+    context "scheduled_for completamente inválido" do
       let(:ai_content) do
-        %({"tool":"create_reminder","scheduled_for":"en dos minutos","message":"x","kind":"notify","device_id":null})
+        %({"tool":"create_reminder","scheduled_for":"cualquier cosa","message":"x","kind":"notify","device_id":null})
       end
 
-      it "no crea el Reminder y avisa al usuario" do
+      it "no crea el Reminder y avisa al usuario incluyendo el valor crudo" do
         expect { handler.call("recordame algo") }.not_to change(Reminder, :count)
-        expect(TelegramClient).to have_received(:send_message).with(/hora no es válida/)
+        expect(TelegramClient).to have_received(:send_message).with(/no entendí la hora.*cualquier cosa/m)
+      end
+    end
+
+    context "scheduled_for en lenguaje natural ('en 5 minutos')" do
+      let(:ai_content) do
+        %({"tool":"create_reminder","scheduled_for":"en 5 minutos","message":"dormir","kind":"notify","device_id":null})
+      end
+
+      it "lo parsea como fallback y crea el Reminder" do
+        expect { handler.call("recordame en 5 minutos dormir") }.to change(Reminder, :count).by(1)
+        expect(Reminder.last.scheduled_for).to be_within(1.minute).of(5.minutes.from_now)
+      end
+    end
+
+    context "AI devuelve el placeholder literal 'YYYY-MM-DD...'" do
+      let(:ai_content) do
+        %({"tool":"create_reminder","scheduled_for":"YYYY-MM-DDTHH:MM:SSZ","message":"x","kind":"notify","device_id":null})
+      end
+
+      it "rechaza el placeholder y avisa" do
+        expect { handler.call("recordame algo") }.not_to change(Reminder, :count)
+        expect(TelegramClient).to have_received(:send_message).with(/no entendí la hora/)
+      end
+    end
+
+    context "AI devuelve un placeholder estilo '<UTC ahora+5min>'" do
+      let(:ai_content) do
+        %({"tool":"create_reminder","scheduled_for":"<UTC ahora+5min>","message":"x","kind":"notify","device_id":null})
+      end
+
+      it "rechaza el placeholder con < >" do
+        expect { handler.call("recordame algo") }.not_to change(Reminder, :count)
+        expect(TelegramClient).to have_received(:send_message).with(/no entendí la hora/)
       end
     end
 

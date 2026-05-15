@@ -32,10 +32,13 @@ class TelegramContextBuilder
       {"tool":"call_device","device_id":"<id_string>","context":"<qué pedirle>"}
 
       2) Programar un recordatorio o acción para el futuro:
-      {"tool":"create_reminder","scheduled_for":"YYYY-MM-DDTHH:MM:SSZ","message":"<texto>","kind":"notify"|"query_device","device_id":"<id_string>"|null}
+      {"tool":"create_reminder","scheduled_for":"<ISO8601 UTC real>","message":"<texto>","kind":"notify"|"query_device","device_id":"<id_string>"|null}
 
       Reglas para create_reminder:
-      - scheduled_for: ISO8601 EN UTC, calculado desde la "FECHA Y HORA ACTUAL" indicada en cada turno
+      - scheduled_for: DEBE ser un timestamp ISO8601 REAL calculado por vos sumando minutos/horas/días a la "FECHA Y HORA ACTUAL" del turno actual.
+        Formato exacto: "YYYY-MM-DDTHH:MM:SSZ" — con la Z al final, sin offset, sin milisegundos.
+        EJEMPLO: si ahora son las 2026-05-15 22:00:00 UTC y el usuario dice "en 5 minutos" → "2026-05-15T22:05:00Z"
+        NUNCA pongas texto descriptivo, lenguaje natural ni placeholders como "<algo>" o "YYYY-MM-DD". Solo el timestamp computado.
       - kind="notify" → aviso simple por Telegram
       - kind="query_device" → en ese momento se va a consultar/comandar al dispositivo
       - device_id: el id_string del dispositivo (ej: "esp32_riego") si kind=query_device, sino null
@@ -77,6 +80,10 @@ class TelegramContextBuilder
     sample_id = devices.first&.device_id || "esp32_riego"
     second_id = devices.second&.device_id || sample_id
 
+    # Para el ejemplo de create_reminder usamos un ISO8601 real (no placeholder)
+    # así el modelo aprende el FORMATO exacto, no la sintaxis "<...>".
+    sample_reminder_time = "2026-01-15T14:30:00Z"
+
     [
       { role: "user",      content: "Hola Mikhael, ¿qué dispositivos tengo?" },
       { role: "assistant", content: "¡Hola! Soy Mikhael. Sí, #{device_summary}. Decime qué hacer con ellos." },
@@ -85,7 +92,7 @@ class TelegramContextBuilder
       { role: "user",      content: "iniciá el otro dispositivo" },
       { role: "assistant", content: %({"tool":"call_device","device_id":"#{second_id}","context":"el usuario pide iniciar el dispositivo"}) },
       { role: "user",      content: "recordame en 5 minutos cerrar la puerta" },
-      { role: "assistant", content: %({"tool":"create_reminder","scheduled_for":"<UTC ahora+5min>","message":"cerrar la puerta","kind":"notify","device_id":null}) },
+      { role: "assistant", content: %({"tool":"create_reminder","scheduled_for":"#{sample_reminder_time}","message":"cerrar la puerta","kind":"notify","device_id":null}) },
       { role: "user",      content: "gracias" },
       { role: "assistant", content: "¡De nada! Cualquier cosa avisame." }
     ]
