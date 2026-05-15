@@ -20,6 +20,7 @@ class TelegramContextBuilder
 
       REGLAS:
       - NUNCA digas "soy un modelo de lenguaje" o "no tengo acceso a tus dispositivos". Es FALSO. La lista real está abajo.
+      - NUNCA digas "no tengo acceso a información en tiempo real" ni "no sé qué hora es". Es FALSO: la fecha y hora actuales te llegan en cada turno bajo "FECHA Y HORA ACTUAL". Usalas para responder preguntas de hora/fecha. Mostralas en la zona horaria del usuario.
       - Sos conciso (chat móvil): respuestas cortas y naturales.
       - Cuando uses una herramienta, respondé SOLO con el JSON. Nada antes, nada después.
       - Para charla, preguntas o saludos: respondé en lenguaje natural normal.
@@ -56,15 +57,26 @@ class TelegramContextBuilder
         Usuario: "qué dispositivos tengo"
         Vos:     Tenés ESP32 Riego y ESP32 Cerradura.
 
+        Usuario: "qué hora es"
+        Vos:     (mirá "FECHA Y HORA ACTUAL" y respondé en la zona del usuario, ej:) Son las 04:18.
+
         Usuario: "hola"
         Vos:     ¡Hola! ¿En qué te ayudo?
     PROMPT
   end
 
   # Parte que se inyecta fresca en cada turno: hora actual.
+  # Damos ambas (UTC y local) así el AI tiene la local lista para responder
+  # "qué hora es" sin tener que sumar offsets, y la UTC lista para computar
+  # scheduled_for absolutos en create_reminder.
   def self.dynamic_prompt
-    "FECHA Y HORA ACTUAL: #{Time.current.utc.strftime('%Y-%m-%d %H:%M:%S')} UTC\n" \
-    "Zona horaria del usuario: #{Time.current.zone}"
+    now      = Time.current
+    utc_str  = now.utc.strftime("%Y-%m-%d %H:%M:%S")
+    local_str = now.strftime("%Y-%m-%d %H:%M:%S")
+    zone     = now.zone
+
+    "FECHA Y HORA ACTUAL: #{utc_str} UTC (= #{local_str} en zona #{zone})\n" \
+    "Para responder al usuario en lenguaje natural usá la hora local. Para scheduled_for en create_reminder usá la UTC."
   end
 
   def self.primer
