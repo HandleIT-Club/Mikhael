@@ -66,17 +66,26 @@ class TelegramContextBuilder
   end
 
   # Parte que se inyecta fresca en cada turno: hora actual.
-  # Damos ambas (UTC y local) así el AI tiene la local lista para responder
-  # "qué hora es" sin tener que sumar offsets, y la UTC lista para computar
-  # scheduled_for absolutos en create_reminder.
+  # Resolución de zona: UserTimezone (DB Setting > ENV > UTC). Damos ambas
+  # (UTC y local) así el AI tiene la local lista para responder "qué hora es"
+  # sin sumar offsets, y la UTC lista para scheduled_for en create_reminder.
+  # Estructurado en tags estilo XML porque los LLMs respetan mejor ese formato
+  # que prosa libre cuando se trata de hechos del turno actual.
   def self.dynamic_prompt
-    now      = Time.current
-    utc_str  = now.utc.strftime("%Y-%m-%d %H:%M:%S")
-    local_str = now.strftime("%Y-%m-%d %H:%M:%S")
-    zone     = now.zone
+    tz_name   = UserTimezone.current
+    now_utc   = Time.now.utc
+    now_local = now_utc.in_time_zone(tz_name)
 
-    "FECHA Y HORA ACTUAL: #{utc_str} UTC (= #{local_str} en zona #{zone})\n" \
-    "Para responder al usuario en lenguaje natural usá la hora local. Para scheduled_for en create_reminder usá la UTC."
+    <<~PROMPT.chomp
+      <hechos_del_turno_actual>
+        <hora_local>#{now_local.strftime('%Y-%m-%d %H:%M:%S')}</hora_local>
+        <hora_utc>#{now_utc.strftime('%Y-%m-%d %H:%M:%S')}</hora_utc>
+        <zona_horaria>#{tz_name}</zona_horaria>
+      </hechos_del_turno_actual>
+
+      Cuando hables en lenguaje natural, usá la hora_local.
+      Cuando computes scheduled_for en create_reminder, usá la hora_utc en formato ISO8601 con Z al final.
+    PROMPT
   end
 
   def self.primer

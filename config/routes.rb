@@ -6,6 +6,7 @@ Rails.application.routes.draw do
   end
 
   resources :model_configs, only: %i[index update]
+  resource  :timezone,      only: %i[update], controller: "timezone"
   resources :devices, only: %i[index create update destroy] do
     member do
       post :regenerate_token

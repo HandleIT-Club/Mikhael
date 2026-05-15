@@ -249,6 +249,34 @@ RSpec.describe TelegramMessageHandler do
     end
   end
 
+  describe "pregunta de hora (fast-path determinístico)" do
+    [
+      "qué hora es",
+      "Qué hora es",
+      "qué hora es?",
+      "que hora es Mikhael",
+      "Qué hora tenemos?",
+      "hora?",
+      "what time is it"
+    ].each do |question|
+      it "responde directamente a '#{question}' sin pasar por el AI" do
+        sent = []
+        allow(TelegramClient).to receive(:send_message) { |msg| sent << msg }
+        handler.call(question)
+        expect(mock_client).not_to have_received(:chat)
+        expect(mock_client).not_to have_received(:stream)
+        expect(sent.join("\n")).to match(/Son las\s*\*?\d{2}:\d{2}/)
+      end
+    end
+
+    it "NO se activa para 'qué hora cierra la farmacia' (no es pregunta de hora actual)" do
+      sent = []
+      allow(TelegramClient).to receive(:send_message) { |msg| sent << msg }
+      handler.call("qué hora cierra la farmacia")
+      expect(sent.join("\n")).not_to match(/Son las\s*\*?\d{2}:\d{2}/)
+    end
+  end
+
   describe "comando /recordatorios" do
     it "lista los recordatorios pendientes" do
       create(:reminder, message: "uno", scheduled_for: 1.hour.from_now)

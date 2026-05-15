@@ -33,10 +33,9 @@ module Mikhael
     # These settings can be overridden in specific environments using the files
     # in config/environments, which are processed later.
     #
-    # Zona horaria de la app. Cambiala via ENV MIKHAEL_TZ (ej: "Buenos Aires",
-    # "Madrid", "Mexico City"). El AI de Telegram recibe esta zona en el system
-    # prompt y la usa para interpretar "mañana a las 8" en hora local.
-    # Si no se setea, queda en UTC.
+    # Zona horaria de la app. Resolución en runtime via UserTimezone (DB
+    # Setting > ENV MIKHAEL_TZ > UTC). Acá solo ponemos el fallback inicial;
+    # cuando el browser detecta la zona la guarda en Setting y se aplica.
     config.time_zone = ENV.fetch("MIKHAEL_TZ", "UTC")
     # config.eager_load_paths << Rails.root.join("extras")
 

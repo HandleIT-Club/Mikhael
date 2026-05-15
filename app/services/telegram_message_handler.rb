@@ -2,7 +2,16 @@
 # Copyright (C) 2026 Nicolás S. Navarro
 # Licensed under AGPL-3.0 — https://www.gnu.org/licenses/agpl-3.0.html
 class TelegramMessageHandler
-  CONV_CACHE_KEY = "telegram_conversation_id".freeze
+  CONV_CACHE_KEY  = "telegram_conversation_id".freeze
+
+  # Preguntas de hora que respondemos directamente desde Ruby — el chat AI
+  # tiene una tendencia entrenada a contestar "no tengo acceso a info en
+  # tiempo real" aun cuando le pasamos la hora en el system prompt. Mejor
+  # determinístico para esto.
+  # Matchea preguntas de hora con o sin vocativo ("qué hora es Mikhael?", "hora?",
+  # "what time is it"). NO matchea "qué hora cierra la farmacia" porque exigimos
+  # que después de "hora" venga un verbo de existencia (es/son/tenemos) o fin.
+  TIME_QUESTION_RE = /\A\s*(qu[eé]\s+hora\s+(es|son|tenemos)\b|\Ahora\s*\??\z|what\s+time\s+is\s+it\b).{0,30}\z/i
 
   def call(text)
     case text.strip
@@ -24,6 +33,8 @@ class TelegramMessageHandler
     when "/reset"
       reset_conversation
       TelegramClient.send_message("✅ Conversación reiniciada.")
+    when TIME_QUESTION_RE
+      answer_time
     else
       handle_chat(text)
     end
@@ -263,6 +274,13 @@ class TelegramMessageHandler
       },
       ->(_) { "❌ No se pudo comandar #{device.name}." }
     )
+  end
+
+  def answer_time
+    now       = Time.current
+    formatted = now.strftime("%H:%M")
+    date      = I18n.l(now.to_date, format: :long) rescue now.strftime("%d/%m/%Y")
+    TelegramClient.send_message("🕐 Son las *#{formatted}* — #{date} (#{now.zone})")
   end
 
   def list_devices
