@@ -60,16 +60,24 @@ RSpec.describe MessageIntentRouter do
     context "respuesta con TZ configurada" do
       before { Setting.set("user_timezone", "America/Argentina/Buenos_Aires") }
 
-      it "muestra la hora en la zona del usuario sin hint" do
+      it "muestra la hora en la zona del usuario con nombre amigable (sin _)" do
         result = described_class.intercept("qué hora es")
-        expect(result.reply).to include("Buenos_Aires")
+        expect(result.reply).to include("Buenos Aires")
         expect(result.reply).not_to match(/\/zona/)
+      end
+
+      it "NUNCA incluye '_' en la respuesta — rompe el Markdown de Telegram" do
+        result = described_class.intercept("qué hora es")
+        # Excluyendo los _ intencionales de las itálicas (que vienen pareados),
+        # el nombre de zona no debe meter _ no balanceados.
+        zone_section = result.reply[/\(([^)]+)\)/, 1]
+        expect(zone_section).not_to include("_")
       end
 
       it "usa UserTimezone aunque Time.zone del thread esté en UTC" do
         Time.use_zone("UTC") do  # simula thread del poll job
           result = described_class.intercept("qué hora es")
-          expect(result.reply).to include("Buenos_Aires")
+          expect(result.reply).to include("Buenos Aires")
         end
       end
     end

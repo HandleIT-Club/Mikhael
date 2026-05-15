@@ -29,15 +29,21 @@ class MessageIntentRouter
   end
 
   def self.time_reply
-    tz_name   = UserTimezone.current
-    now_local = Time.now.in_time_zone(tz_name)
-    formatted = now_local.strftime("%H:%M")
-    date      = now_local.strftime("%d/%m/%Y")
+    tz_name    = UserTimezone.current
+    now_local  = Time.now.in_time_zone(tz_name)
+    formatted  = now_local.strftime("%H:%M")
+    date       = now_local.strftime("%d/%m/%Y")
 
-    text = "🕐 Son las *#{formatted}* — #{date} (#{tz_name})"
+    # IANA names tienen "/" y "_" (ej "America/Argentina/Buenos_Aires"). El "_"
+    # rompe el parser de Markdown de Telegram (lo interpreta como itálica) y la
+    # API rechaza el mensaje. Mostramos solo la última parte con underscores
+    # convertidos a espacios. "America/Argentina/Buenos_Aires" → "Buenos Aires".
+    display_tz = tz_name.split("/").last.tr("_", " ")
+
+    text = "🕐 Son las *#{formatted}* — #{date} (#{display_tz})"
     text += "\n\n_Tu zona horaria no está configurada. En Telegram usá `/zona Buenos Aires` (o tu zona)._" if tz_name == "UTC" && !timezone_explicitly_set?
 
-    Result.new(reply: text, assistant_persist: "Son las #{formatted} (#{tz_name}).")
+    Result.new(reply: text, assistant_persist: "Son las #{formatted} (#{display_tz}).")
   end
 
   def self.timezone_explicitly_set?

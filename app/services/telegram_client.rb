@@ -33,7 +33,14 @@ class TelegramClient
   def self.post(method, body)
     uri = URI("#{BASE}/bot#{ENV['TELEGRAM_BOT_TOKEN']}/#{method}")
     res = Net::HTTP.post(uri, body.to_json, "Content-Type" => "application/json")
-    JSON.parse(res.body)
+    parsed = JSON.parse(res.body)
+    # Telegram devuelve 200 OK pero {"ok": false, "description": "..."} cuando
+    # rechaza el contenido (ej: Markdown mal parseado por un "_" suelto). Sin
+    # este log el error es silencioso y la respuesta nunca llega al usuario.
+    unless parsed["ok"]
+      Rails.logger.error("Telegram POST #{method} rechazado: #{parsed.inspect} — body=#{body.inspect}")
+    end
+    parsed
   rescue => e
     Rails.logger.error("Telegram POST #{method}: #{e.message}")
     nil
