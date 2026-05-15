@@ -50,6 +50,8 @@ class TelegramMessageHandler
 
   # Despacha sobre el tool elegido por el AI. Una sola llamada al modelo;
   # los recordatorios y los comandos a dispositivos viven en el mismo system prompt.
+  REMINDER_INTENT_RE = /\b(record[áa]?me|recuerdame|recu[ée]rdame|av[ií]same|avisame)\b/i
+
   def handle_ai_response(response, user_message)
     tool_call = ToolCallParser.parse(response.content)
 
@@ -63,7 +65,53 @@ class TelegramMessageHandler
       return TelegramClient.send_message(summary)
     end
 
+    # Red de seguridad: el AI a veces "se rinde" después de fallar el tool
+    # varias veces y empieza a responder chat text inventado ("te avisaré en
+    # 2 min..."). Si el mensaje del usuario es claramente un recordatorio,
+    # lo hacemos nosotros directamente desde el input.
+    if reminder_intent?(user_message)
+      Rails.logger.warn("AI no llamó al tool create_reminder pero el user pidió recordatorio: #{user_message.inspect}. Activando fallback manual.")
+      return TelegramClient.send_message(create_reminder_from_user_message(user_message))
+    end
+
     TelegramClient.send_message(response.content)
+  end
+
+  def reminder_intent?(text)
+    text.to_s.match?(REMINDER_INTENT_RE)
+  end
+
+  # Extrae directamente del mensaje del usuario cuando el AI no usó el tool.
+  def create_reminder_from_user_message(user_message)
+    scheduled_for = parse_relative(user_message.to_s)
+    return "❌ Entendí que querés un recordatorio pero no pude entender cuándo. Probá con \"en X minutos/horas\" o \"mañana a las 8\"." if scheduled_for.nil?
+
+    message_text = extract_reminder_text(user_message)
+
+    reminder = Reminder.new(
+      scheduled_for: scheduled_for,
+      message:       message_text,
+      kind:          "notify"
+    )
+
+    if reminder.save
+      ExecuteReminderJob.set(wait_until: reminder.scheduled_for).perform_later(reminder.id)
+      formatted = reminder.scheduled_for.in_time_zone.strftime("%d/%m a las %H:%M")
+      "⏰ Recordatorio ##{reminder.id} programado para el *#{formatted}*:\n_#{reminder.message}_"
+    else
+      "❌ No pude programar el recordatorio: #{reminder.errors.full_messages.join(', ')}"
+    end
+  end
+
+  # Saca verbo de comando, conector "de" y la expresión temporal — deja la acción.
+  # "Recordame tomar la pastilla en 2 minutos" → "tomar la pastilla"
+  # "Recordame en 5 minutos cerrar la puerta" → "cerrar la puerta"
+  def extract_reminder_text(message)
+    text = message.to_s.dup
+    text.sub!(REMINDER_INTENT_RE, "")
+    text.sub!(/\A\s*de\s+/i, "")
+    text.sub!(/\s*en\s+\d+\s*[a-zA-Záéíóú]+\s*/i, " ")
+    text.strip.presence || "recordatorio"
   end
 
   def create_reminder_from_tool(tool, user_message = nil)

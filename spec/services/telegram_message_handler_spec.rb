@@ -170,6 +170,62 @@ RSpec.describe TelegramMessageHandler do
     end
   end
 
+  # Caso real visto en producción: el AI se "rindió" del tool después de
+  # fallar varias veces y empezó a responder chat text. La red de seguridad
+  # detecta la intención del usuario y crea el recordatorio manualmente.
+  describe "fallback manual cuando el AI no usa el tool" do
+    let(:ai_content) { "¡Claro! Te recordaré en 2 minutos. Recuerda tomar tu pastilla." }
+
+    it "detecta 'Recordame X en N minutos' y crea el Reminder" do
+      expect {
+        handler.call("Recordame tomar la pastilla en 2 minutos")
+      }.to change(Reminder, :count).by(1)
+      reminder = Reminder.last
+      expect(reminder.scheduled_for).to be_within(1.minute).of(2.minutes.from_now)
+      expect(reminder.message).to eq("tomar la pastilla")
+    end
+
+    it "detecta 'Avisame en N horas X' y extrae el qué" do
+      expect {
+        handler.call("Avisame en 1 hora cerrar la puerta")
+      }.to change(Reminder, :count).by(1)
+      expect(Reminder.last.message).to eq("cerrar la puerta")
+    end
+
+    it "detecta 'Recordame en N min X'" do
+      expect {
+        handler.call("Recordame en 5 minutos llamar al doctor")
+      }.to change(Reminder, :count).by(1)
+      expect(Reminder.last.message).to eq("llamar al doctor")
+    end
+
+    it "responde pidiendo aclaración cuando no hay tiempo en el mensaje" do
+      expect {
+        handler.call("Recordame mi cumpleaños")
+      }.not_to change(Reminder, :count)
+      expect(TelegramClient).to have_received(:send_message).with(/no pude entender cuándo/)
+    end
+
+    it "NO se activa si el mensaje no es un pedido de recordatorio" do
+      expect {
+        handler.call("Hola, ¿cómo estás?")
+      }.not_to change(Reminder, :count)
+      expect(TelegramClient).to have_received(:send_message).with(ai_content)
+    end
+
+    context "cuando el AI SÍ usó el tool correctamente" do
+      let(:ai_content) do
+        %({"tool":"create_reminder","scheduled_for":"#{5.minutes.from_now.utc.iso8601}","message":"x","kind":"notify","device_id":null})
+      end
+
+      it "no duplica — solo se crea uno" do
+        expect {
+          handler.call("Recordame algo en 5 minutos")
+        }.to change(Reminder, :count).by(1)
+      end
+    end
+  end
+
   describe "comando /recordatorios" do
     it "lista los recordatorios pendientes" do
       create(:reminder, message: "uno", scheduled_for: 1.hour.from_now)
