@@ -226,6 +226,30 @@ RSpec.describe TelegramMessageHandler do
     end
   end
 
+  describe "defensa contra duplicados (recent_duplicate)" do
+    let(:ai_content) { "¡Claro! Te recordaré en 5 minutos." }
+
+    it "no crea un segundo Reminder si llega el mismo pedido < 30s después" do
+      handler.call("Recordame en 5 minutos cerrar la puerta")
+      expect {
+        handler.call("Recordame en 5 minutos cerrar la puerta")
+      }.not_to change(Reminder, :count)
+    end
+
+    it "responde con la confirmación del Reminder existente (mismo id)" do
+      handler.call("Recordame en 5 minutos cerrar la puerta")
+      first_id = Reminder.last.id
+      handler.call("Recordame en 5 minutos cerrar la puerta")
+      expect(TelegramClient).to have_received(:send_message).with(/Recordatorio ##{first_id}/).twice
+    end
+
+    it "permite un segundo Reminder con el mismo texto si la hora es muy distinta" do
+      handler.call("Recordame en 5 minutos cerrar la puerta")
+      handler.call("Recordame en 2 horas cerrar la puerta")
+      expect(Reminder.count).to eq(2)
+    end
+  end
+
   describe "comando /recordatorios" do
     it "lista los recordatorios pendientes" do
       create(:reminder, message: "uno", scheduled_for: 1.hour.from_now)

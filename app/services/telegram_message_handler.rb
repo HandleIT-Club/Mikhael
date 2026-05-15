@@ -86,21 +86,53 @@ class TelegramMessageHandler
     scheduled_for = parse_relative(user_message.to_s)
     return "❌ Entendí que querés un recordatorio pero no pude entender cuándo. Probá con \"en X minutos/horas\" o \"mañana a las 8\"." if scheduled_for.nil?
 
-    message_text = extract_reminder_text(user_message)
+    persist_reminder(
+      scheduled_for: scheduled_for,
+      message:       extract_reminder_text(user_message),
+      kind:          "notify",
+      device_id:     nil
+    )
+  end
+
+  # Persistencia compartida + defensa contra duplicados.
+  # Si en los últimos 30 segundos se creó un Reminder con el mismo mensaje y
+  # una hora cercana (±1min), no creamos otro — devolvemos confirmación del
+  # existente. Esto cubre dos escenarios:
+  #   1. El usuario hace doble-tap por impaciencia.
+  #   2. El offset del polling se pierde (ej. restart del server) y Telegram
+  #      nos devuelve el mismo update otra vez.
+  def persist_reminder(scheduled_for:, message:, kind:, device_id:)
+    if (existing = recent_duplicate(message, scheduled_for))
+      Rails.logger.info("persist_reminder: duplicado dentro de 30s — devolviendo Reminder ##{existing.id}")
+      return format_confirmation(existing)
+    end
 
     reminder = Reminder.new(
       scheduled_for: scheduled_for,
-      message:       message_text,
-      kind:          "notify"
+      message:       message,
+      kind:          kind,
+      device_id:     device_id
     )
 
     if reminder.save
       ExecuteReminderJob.set(wait_until: reminder.scheduled_for).perform_later(reminder.id)
-      formatted = reminder.scheduled_for.in_time_zone.strftime("%d/%m a las %H:%M")
-      "⏰ Recordatorio ##{reminder.id} programado para el *#{formatted}*:\n_#{reminder.message}_"
+      format_confirmation(reminder)
     else
+      Rails.logger.error("persist_reminder: #{reminder.errors.full_messages.join(', ')}")
       "❌ No pude programar el recordatorio: #{reminder.errors.full_messages.join(', ')}"
     end
+  end
+
+  def recent_duplicate(message, scheduled_for)
+    Reminder.where(message: message, executed_at: nil)
+            .where("scheduled_for BETWEEN ? AND ?", scheduled_for - 1.minute, scheduled_for + 1.minute)
+            .where("created_at > ?", 30.seconds.ago)
+            .first
+  end
+
+  def format_confirmation(reminder)
+    formatted = reminder.scheduled_for.in_time_zone.strftime("%d/%m a las %H:%M")
+    "⏰ Recordatorio ##{reminder.id} programado para el *#{formatted}*:\n_#{reminder.message}_"
   end
 
   # Saca verbo de comando, conector "de" y la expresión temporal — deja la acción.
@@ -152,21 +184,8 @@ class TelegramMessageHandler
       fk_id  = device.id
     end
 
-    reminder = Reminder.new(
-      scheduled_for: scheduled_for,
-      message:       tool["message"].to_s.presence || "recordatorio",
-      kind:          kind,
-      device_id:     fk_id
-    )
-
-    if reminder.save
-      ExecuteReminderJob.set(wait_until: reminder.scheduled_for).perform_later(reminder.id)
-      formatted = reminder.scheduled_for.in_time_zone.strftime("%d/%m a las %H:%M")
-      "⏰ Recordatorio ##{reminder.id} programado para el *#{formatted}*:\n_#{reminder.message}_"
-    else
-      Rails.logger.error("create_reminder_from_tool: #{reminder.errors.full_messages.join(', ')}")
-      "❌ No pude programar el recordatorio: #{reminder.errors.full_messages.join(', ')}"
-    end
+    message_text = tool["message"].to_s.presence || "recordatorio"
+    persist_reminder(scheduled_for: scheduled_for, message: message_text, kind: kind, device_id: fk_id)
   end
 
   # El AI puede pasar el id_string ("esp32_riego") o, en el peor caso, el id numérico.

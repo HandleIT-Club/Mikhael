@@ -4,20 +4,23 @@
 class TelegramPollJob < ApplicationJob
   queue_as :default
 
-  POLL_INTERVAL  = 2.seconds
-  OFFSET_CACHE   = "telegram_poll_offset".freeze
-  ALLOWED_CHAT   = ENV["TELEGRAM_CHAT_ID"].freeze
+  POLL_INTERVAL = 2.seconds
+  OFFSET_KEY    = "telegram_poll_offset".freeze
+  ALLOWED_CHAT  = ENV["TELEGRAM_CHAT_ID"].freeze
 
   def perform
     return unless TelegramClient.configured?
 
-    offset   = Rails.cache.read(OFFSET_CACHE)
+    # Persistimos el offset en DB (modelo Setting) en vez de Rails.cache —
+    # el cache de dev es :memory_store y se borra en cada reinicio, lo que
+    # hacía que Telegram nos devolviera mensajes ya procesados al arrancar.
+    offset   = Setting.get(OFFSET_KEY)&.to_i
     response = TelegramClient.get_updates(offset: offset)
 
     if response&.dig("ok")
       (response["result"] || []).each do |update|
         process(update)
-        Rails.cache.write(OFFSET_CACHE, update["update_id"] + 1)
+        Setting.set(OFFSET_KEY, update["update_id"] + 1)
       end
     end
   ensure
