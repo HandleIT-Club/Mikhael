@@ -275,6 +275,16 @@ RSpec.describe TelegramMessageHandler do
       handler.call("qué hora cierra la farmacia")
       expect(sent.join("\n")).not_to match(/Son las\s*\*?\d{2}:\d{2}/)
     end
+
+    it "usa UserTimezone aunque Time.zone del thread esté en UTC (caso real del poll job)" do
+      Setting.set("user_timezone", "America/Argentina/Buenos_Aires")
+      Time.use_zone("UTC") do  # simula el thread del poll job
+        sent = []
+        allow(TelegramClient).to receive(:send_message) { |msg| sent << msg }
+        handler.call("qué hora es")
+        expect(sent.join("\n")).to include("Buenos_Aires").or include("-03").or match(/\(America/)
+      end
+    end
   end
 
   describe "comando /recordatorios" do

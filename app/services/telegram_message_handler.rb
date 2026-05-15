@@ -151,7 +151,9 @@ class TelegramMessageHandler
   end
 
   def format_confirmation(reminder)
-    formatted = reminder.scheduled_for.in_time_zone.strftime("%d/%m a las %H:%M")
+    # Igual que answer_time: pasamos la zona explícita porque Time.zone
+    # del thread del poll job está en UTC, no en la del usuario.
+    formatted = reminder.scheduled_for.in_time_zone(UserTimezone.current).strftime("%d/%m a las %H:%M")
     "⏰ Recordatorio ##{reminder.id} programado para el *#{formatted}*:\n_#{reminder.message}_"
   end
 
@@ -277,10 +279,15 @@ class TelegramMessageHandler
   end
 
   def answer_time
-    now       = Time.current
-    formatted = now.strftime("%H:%M")
-    date      = I18n.l(now.to_date, format: :long) rescue now.strftime("%d/%m/%Y")
-    TelegramClient.send_message("🕐 Son las *#{formatted}* — #{date} (#{now.zone})")
+    # IMPORTANTE: NO usar Time.current acá. Time.zone es per-thread; el
+    # TelegramPollJob corre en un thread distinto al que setea la zona desde
+    # el browser, así que Time.current quedaría en UTC. Resolvemos siempre
+    # desde UserTimezone.current y convertimos explícito.
+    tz_name   = UserTimezone.current
+    now_local = Time.now.in_time_zone(tz_name)
+    formatted = now_local.strftime("%H:%M")
+    date      = now_local.strftime("%d/%m/%Y")
+    TelegramClient.send_message("🕐 Son las *#{formatted}* — #{date} (#{tz_name})")
   end
 
   def list_devices
@@ -302,8 +309,9 @@ class TelegramMessageHandler
       return
     end
 
+    tz = UserTimezone.current
     lines = reminders.map do |r|
-      formatted = r.scheduled_for.in_time_zone.strftime("%d/%m %H:%M")
+      formatted = r.scheduled_for.in_time_zone(tz).strftime("%d/%m %H:%M")
       kind_tag  = r.query_device? ? " 📡" : ""
       "[#{r.id}] #{formatted}#{kind_tag} — #{r.message}"
     end
