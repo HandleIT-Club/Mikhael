@@ -27,7 +27,7 @@ module Api
 
       def authenticate_user_via_api_token!
         token = request.headers["Authorization"].to_s.sub(/\ABearer\s+/, "")
-        user  = User.find_by(api_token: token) if token.present?
+        user  = User.find_by_api_token(token)
 
         if user
           Current.user = user

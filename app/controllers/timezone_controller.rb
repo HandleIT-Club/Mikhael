@@ -6,16 +6,17 @@
 # y la persiste vía UserTimezone. Lo llama un Stimulus controller la primera
 # vez que cargás cualquier página, y solo si la zona cambió respecto a lo
 # guardado.
+#
+# CSRF: el Stimulus controller (app/javascript/controllers/timezone_controller.js)
+# manda el X-CSRF-Token del <meta>. Por eso usamos el protect_from_forgery
+# normal de Rails — sin null_session, que rompía silenciosamente la sesión
+# del user cuando el token faltaba.
 class TimezoneController < ApplicationController
-  protect_from_forgery with: :null_session
-
   def update
-    tz = params[:timezone].to_s.strip
-
-    if UserTimezone.set(tz)
+    if UserTimezone.set(params[:timezone].to_s.strip, user: current_user)
       head :no_content
     else
-      render json: { error: "zona inválida: #{tz}" }, status: :unprocessable_entity
+      render json: { error: "zona inválida" }, status: :unprocessable_entity
     end
   end
 end

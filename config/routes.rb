@@ -7,9 +7,15 @@ Rails.application.routes.draw do
     resources :messages, only: %i[create]
   end
 
-  resources :model_configs, only: %i[index update]
-  resource  :timezone,      only: %i[update], controller: "timezone"
-  resources :devices, only: %i[index create update destroy] do
+  # Settings: una sola página admin-only con contexto del asistente + users.
+  # Devices vive aparte (es la feature estrella, ruta principal).
+  resource  :settings, only: %i[show update]
+  resources :users,    only: %i[create update destroy] do
+    member { post :regenerate_token }
+  end
+
+  resource  :timezone, only: %i[update], controller: "timezone"
+  resources :devices,  only: %i[index create update destroy] do
     member do
       post :regenerate_token
       post :command

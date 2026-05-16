@@ -34,26 +34,29 @@ RSpec.describe UserTimezone do
   end
 
   describe ".set" do
-    before { Current.user = user }
-
-    it "persiste la zona para el Current.user y actualiza Time.zone" do
-      described_class.set("America/Argentina/Buenos_Aires")
+    it "persiste la zona para el user dado y actualiza Time.zone" do
+      described_class.set("America/Argentina/Buenos_Aires", user: user)
       expect(Setting.get_for(user, "user_timezone")).to eq("America/Argentina/Buenos_Aires")
       expect(Time.zone.name).to eq("America/Argentina/Buenos_Aires")
     end
 
     it "retorna true si la zona es válida" do
-      expect(described_class.set("Madrid")).to be(true)
+      expect(described_class.set("Madrid", user: user)).to be(true)
     end
 
     it "retorna false si la zona es inválida" do
-      expect(described_class.set("Inválida/Tz")).to be(false)
+      expect(described_class.set("Inválida/Tz", user: user)).to be(false)
       expect(Setting.get_for(user, "user_timezone")).to be_nil
     end
 
-    it "retorna false si no hay Current.user (no podemos persistir sin dueño)" do
-      Current.user = nil
-      expect(described_class.set("Madrid")).to be(false)
+    it "retorna false si user es nil" do
+      expect(described_class.set("Madrid", user: nil)).to be(false)
+    end
+
+    it "default: user lo toma de Current.user si no se pasa" do
+      Current.user = user
+      expect(described_class.set("Madrid")).to be(true)
+      expect(Setting.get_for(user, "user_timezone")).to eq("Madrid")
     end
   end
 end

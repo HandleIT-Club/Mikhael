@@ -22,13 +22,16 @@ class ExecuteReminderJob < ApplicationJob
       return
     end
 
-    if reminder.executed_at.present?
-      Rails.logger.info("ExecuteReminderJob: reminder ##{reminder_id} ya ejecutado en #{reminder.executed_at}, saltando.")
-      return
-    end
+    Rails.logger.tagged("reminder=#{reminder.id}", "user=#{reminder.user_id}", "kind=#{reminder.kind}") do
+      if reminder.executed_at.present?
+        Rails.logger.info("ya ejecutado en #{reminder.executed_at}, saltando.")
+        return
+      end
 
-    execute(reminder)
-    reminder.update!(executed_at: Time.current)
+      Rails.logger.info("ejecutando — scheduled_for=#{reminder.scheduled_for}")
+      execute(reminder)
+      reminder.update!(executed_at: Time.current)
+    end
   rescue => e
     Rails.logger.error("ExecuteReminderJob#perform(#{reminder_id}): #{e.class} — #{e.message}")
     reminder&.update(executed_at: Time.current)

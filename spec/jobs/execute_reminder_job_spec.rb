@@ -7,6 +7,7 @@ RSpec.describe ExecuteReminderJob do
     allow(TelegramClient).to receive(:send_message)
     allow(MqttPublisher).to receive(:publish)
     allow(OllamaModels).to receive(:installed).and_return([])
+    stub_ai_provider!
   end
 
   describe "#perform" do
@@ -82,8 +83,23 @@ RSpec.describe ExecuteReminderJob do
       end
     end
 
-    context "kind=query_device con device_id inexistente" do
-      let(:reminder) { create(:reminder, :past, user: user, kind: "query_device", device_id: 999_999, message: "x") }
+    # Antes el test usaba device_id=999_999 (inexistente). Con la FK
+    # on_delete: nullify, la DB rechaza un FK colgado. El escenario real es:
+    # el reminder se crea con un device válido, luego ese device se borra,
+    # y la FK deja device_id=NULL. El job debe manejarlo sin crashear.
+    context "kind=query_device cuando el device fue borrado después" do
+      let(:device)   { create(:device) }
+      let(:reminder) { create(:reminder, :past, user: user, kind: "query_device", device: device, message: "x") }
+
+      before do
+        reminder            # crea reminder con FK válida
+        device.destroy      # on_delete: nullify → reminder.device_id pasa a NULL
+        reminder.reload
+      end
+
+      it "device_id quedó NULL tras borrar el device (on_delete: nullify)" do
+        expect(reminder.device_id).to be_nil
+      end
 
       it "no lanza error y manda mensaje de error" do
         expect { described_class.perform_now(reminder.id) }.not_to raise_error

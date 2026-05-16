@@ -13,10 +13,12 @@
     <div class="p-4 space-y-2">
       <%= link_to "Nueva conversación", conversations_path(new: 1),
             class: "block w-full py-2 px-4 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold text-sm transition-colors text-center" %>
-      <%= link_to "⚙ Contextos", model_configs_path,
-            class: "block w-full py-2 px-4 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm transition-colors text-center" %>
       <%= link_to "📡 Dispositivos", devices_path,
             class: "block w-full py-2 px-4 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm transition-colors text-center" %>
+      <% if current_user&.admin? %>
+        <%= link_to "⚙ Configuración", settings_path,
+              class: "block w-full py-2 px-4 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm transition-colors text-center" %>
+      <% end %>
     </div>
 
     <nav class="flex-1 overflow-y-auto px-2 space-y-1">

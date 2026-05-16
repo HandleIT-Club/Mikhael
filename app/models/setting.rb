@@ -22,6 +22,9 @@ class Setting < ApplicationRecord
     where(user_id: nil).find_by(key: key)&.value || default
   end
 
+  # No usamos upsert porque SQLite trata NULL como ≠ NULL en UNIQUE — dos
+  # filas globales con la misma key pasarían el índice. El único uso real es
+  # `telegram_poll_offset`, escrito por un solo job a la vez (advisory lock).
   def self.set(key, value)
     record       = where(user_id: nil).find_or_initialize_by(key: key)
     record.value = value.to_s
@@ -35,10 +38,12 @@ class Setting < ApplicationRecord
     where(user_id: user.id).find_by(key: key)&.value || default
   end
 
+  # Upsert atómico (sin race condition entre dos requests/jobs concurrentes
+  # del mismo user). El índice único (user_id, key) es efectivo cuando
+  # user_id NO es NULL.
   def self.set_for(user, key, value)
-    record       = where(user_id: user.id).find_or_initialize_by(key: key)
-    record.value = value.to_s
-    record.save!
+    return value if user.nil?
+    upsert({ user_id: user.id, key: key.to_s, value: value.to_s }, unique_by: %i[user_id key])
     value
   end
 end

@@ -58,7 +58,10 @@ module Authentication
 
   def store_return_location
     return if request.xhr? || request.format.turbo_stream?
-    session[:return_to] = request.fullpath if request.get?
+    # HEAD se routea como GET pero request.get? devuelve false. Lo tratamos
+    # igual — si alguien hace HEAD a una página protegida, mandarlo al login
+    # y luego de vuelta a esa página es el comportamiento correcto.
+    session[:return_to] = request.fullpath if request.get? || request.head?
   end
 
   def consume_return_location

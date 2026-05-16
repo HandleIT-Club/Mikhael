@@ -27,6 +27,17 @@ class ToolCallExecutor
     def self.dual(reply:, persist:)
       new(reply: reply, assistant_persist: persist)
     end
+
+    # Sentinel para casos donde detectamos un tool pero NO queremos mostrar
+    # nada al usuario (ej: Reminder duplicado — el primer turno ya respondió).
+    # El caller distingue silenced? de nil (que significa "no era tool call").
+    def self.silenced
+      new(reply: nil, assistant_persist: nil)
+    end
+
+    def silenced?
+      reply.nil? && assistant_persist.nil?
+    end
   end
 
   # Coincide con "recordame X en N min", "podrías recordarme...", "que me
@@ -172,7 +183,7 @@ class ToolCallExecutor
   def persist_reminder(scheduled_for:, message:, kind:, device_id:)
     if (existing = recent_duplicate(message, scheduled_for))
       Rails.logger.info("persist_reminder: duplicado de Reminder ##{existing.id} — silencioso")
-      return nil  # silencio total — el primer mensaje ya fue
+      return Result.silenced  # el primer turno ya respondió, no mostramos nada
     end
 
     reminder = @user.reminders.new(scheduled_for: scheduled_for, message: message, kind: kind, device_id: device_id)
@@ -219,15 +230,16 @@ class ToolCallExecutor
   end
 
   # Captura "<número> <unidad>" en cualquier parte del string. Acepta español
-  # e inglés. Recorre varios strings hasta encontrar un match.
+  # e inglés. Recorre varios strings y devuelve el PRIMER match cuya unidad
+  # sea válida — no el primer "N <palabra>" (que podía ser "120 cosas").
   def parse_relative(*strings)
     strings.each do |str|
       next if str.blank?
-      next unless (m = str.match(/(\d+)\s*([a-zA-Záéíóú]+)/))
 
-      n          = m[1].to_i
-      multiplier = unit_to_seconds(m[2].downcase)
-      return (n * multiplier).seconds.from_now if multiplier
+      str.scan(/(\d+)\s*([a-zA-Záéíóú]+)/).each do |num, word|
+        multiplier = unit_to_seconds(word.downcase)
+        return (num.to_i * multiplier).seconds.from_now if multiplier
+      end
     end
     nil
   end

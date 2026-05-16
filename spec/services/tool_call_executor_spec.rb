@@ -7,6 +7,7 @@ RSpec.describe ToolCallExecutor do
     allow(MqttPublisher).to receive(:publish)
     allow(TelegramClient).to receive(:send_message)
     allow(OllamaModels).to receive(:installed).and_return([])
+    stub_ai_provider!
   end
 
   describe "#call con call_device" do
@@ -74,12 +75,14 @@ RSpec.describe ToolCallExecutor do
       expect(executor.call(tool_json).reply).to match(/No encontré el dispositivo/i)
     end
 
-    it "dedup silencioso: segundo idéntico devuelve nil reply" do
+    it "dedup silencioso: segundo idéntico devuelve Result.silenced" do
       executor = described_class.new(user_message: "recordame en 5 min algo", user: test_user)
       tool_json = %({"tool":"create_reminder","scheduled_for":"#{5.minutes.from_now.utc.iso8601}","message":"algo","kind":"notify","device_id":null})
       executor.call(tool_json)
       result = executor.call(tool_json)
-      expect(result).to be_nil
+      expect(result).not_to be_nil
+      expect(result).to be_silenced
+      expect(result.reply).to be_nil
     end
   end
 

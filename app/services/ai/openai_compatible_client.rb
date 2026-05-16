@@ -7,18 +7,31 @@ require "json"
 module Ai
   # Para providers con API OpenAI-compatible que no podemos rutear por RubyLLM
   # porque openai_api_base ya está reservado por Groq.
+  #
+  # #chat usa Faraday con retries automáticos (red flaky no debe traducirse
+  # en fallo inmediato; la cadena de fallback ya tiene su propio fallback de
+  # modelo, esto es retry del MISMO modelo en errores transientes).
+  #
+  # #stream sigue con Net::HTTP porque SSE requiere read_body con chunks, y
+  # Faraday no soporta on_data natively cross-adapter de forma estable.
   class OpenAiCompatibleClient < BaseClient
+    READ_TIMEOUT_STREAM = 120
+
     def chat(messages:, model:)
       key = api_key
       return Failure(:invalid_api_key) if key.blank?
 
       actual_model = strip_prefix(model)
       formatted    = format_messages(messages)
-      response     = post_completion(actual_model, formatted, key)
+
+      response = connection(key).post("chat/completions") do |req|
+        req.headers["Content-Type"] = "application/json"
+        req.body = { model: actual_model, messages: formatted }.to_json
+      end
 
       handle_response(response, model)
-    rescue Errno::ECONNREFUSED, SocketError, Net::OpenTimeout, Net::ReadTimeout => e
-      Rails.logger.error("#{self.class} connection error: #{e.message}")
+    rescue Faraday::Error => e
+      Rails.logger.error("#{self.class} chat error: #{e.class} — #{e.message}")
       Failure(:ai_error)
     end
 
@@ -26,12 +39,12 @@ module Ai
       key = api_key
       return Failure(:invalid_api_key) if key.blank?
 
-      actual_model   = strip_prefix(model)
-      formatted      = format_messages(messages)
-      full_content   = +""
+      actual_model = strip_prefix(model)
+      formatted    = format_messages(messages)
+      full_content = +""
 
       uri = URI("#{self.class.api_base}/chat/completions")
-      Net::HTTP.start(uri.host, uri.port, use_ssl: true, read_timeout: 120) do |http|
+      Net::HTTP.start(uri.host, uri.port, use_ssl: true, read_timeout: READ_TIMEOUT_STREAM) do |http|
         req = Net::HTTP::Post.new(uri)
         req["Authorization"] = "Bearer #{key}"
         req["Content-Type"]  = "application/json"
@@ -51,11 +64,20 @@ module Ai
 
       build_response(full_content, model, provider_name)
     rescue Errno::ECONNREFUSED, SocketError, Net::OpenTimeout, Net::ReadTimeout => e
-      Rails.logger.error("#{self.class} stream error: #{e.message}")
+      Rails.logger.error("#{self.class} stream error: #{e.class} — #{e.message}")
       Failure(:ai_error)
     end
 
     private
+
+    def connection(key)
+      Http::Client.connection(
+        base_url: "#{self.class.api_base}/",
+        headers: { "Authorization" => "Bearer #{key}" },
+        timeout: 60,
+        open_timeout: 5
+      )
+    end
 
     def parse_sse_stream(response, full_content, &block)
       buffer = +""
@@ -72,7 +94,7 @@ module Ai
               full_content << delta
               block&.call(delta)
             end
-          rescue JSON::ParseError
+          rescue JSON::ParserError
             # fragmento malformado — ignorar y continuar
           end
         end
@@ -80,7 +102,7 @@ module Ai
     end
 
     def handle_response(response, model)
-      case response.code.to_i
+      case response.status
       when 200
         data    = JSON.parse(response.body)
         content = data.dig("choices", 0, "message", "content").to_s
@@ -90,19 +112,8 @@ module Ai
       when 401, 403
         Failure(:invalid_api_key)
       else
-        Rails.logger.error("#{self.class} error #{response.code}: #{response.body.truncate(200)}")
+        Rails.logger.error("#{self.class} error #{response.status}: #{response.body.to_s.truncate(200)}")
         Failure(:ai_error)
-      end
-    end
-
-    def post_completion(model, messages, key)
-      uri = URI("#{self.class.api_base}/chat/completions")
-      Net::HTTP.start(uri.host, uri.port, use_ssl: true, read_timeout: 60) do |http|
-        req = Net::HTTP::Post.new(uri)
-        req["Authorization"]  = "Bearer #{key}"
-        req["Content-Type"]   = "application/json"
-        req.body = { model: model, messages: messages }.to_json
-        http.request(req)
       end
     end
 

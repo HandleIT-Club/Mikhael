@@ -4,6 +4,8 @@
 module Api
   module V1
     class DevicesController < BaseController
+      include AdminAuthorization
+
       rate_limit to:     ENV.fetch("RATE_LIMIT_MESSAGES_PER_MIN", "30").to_i,
                  within: 1.minute,
                  by:     -> { request.remote_ip },
@@ -11,6 +13,7 @@ module Api
                  store:  RATE_LIMIT_STORE,
                  only:   :command
 
+      before_action :require_admin!
       before_action :set_device, only: %i[update destroy regenerate_token command]
 
       def index
