@@ -1,6 +1,15 @@
 # Omakase Ruby styling for Rails
 inherit_gem: { rubocop-rails-omakase: rubocop.yml }
 
+# Schemas auto-generados por Rails usan el formato del dumper de ActiveRecord
+# (sin espacios dentro de `[]`), mientras que omakase enforce `EnforcedStyle: space`.
+# Cada `db:migrate` o `db:prepare` revertía el "fix" y el diff parecía sucio.
+# Excluimos los schemas DE ESTE COP para que Rails los maneje.
+Layout/SpaceInsideArrayLiteralBrackets:
+  Exclude:
+    - "db/schema.rb"
+    - "db/*_schema.rb"
+
 # Overwrite or add rules to create your own house style
 #
 # # Use `[a, [b, c]]` not `[ a, [ b, c ] ]`
