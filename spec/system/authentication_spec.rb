@@ -1,9 +1,11 @@
 require "rails_helper"
 
 RSpec.describe "Authentication", type: :system do
-  let(:user) { create(:user, password: "supersecret123456") }
+  # let! para asegurar que existe ANTES de cada visit. Sin esto el setup
+  # wizard (DB vacía) intercepta /session/new y no encontramos el form.
+  let!(:user) { create(:user, password: "supersecret123456") }
 
-  it "redirige al login cuando entrás sin sesión" do
+  it "redirige al login cuando entrás sin sesión (y ya hay users)" do
     visit "/"
     expect(page).to have_content("Iniciá sesión")
   end

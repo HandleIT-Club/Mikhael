@@ -2,9 +2,10 @@
 # Copyright (C) 2026 Nicolás S. Navarro
 # Licensed under AGPL-3.0 — https://www.gnu.org/licenses/agpl-3.0.html
 
-# Login (new/create) + logout (destroy). Sin signup público — los users los
-# crea el admin via `bin/rails users:create` (decisión arquitectónica:
-# Mikhael es asistente personal/familiar, no SaaS).
+# Login (new/create) + logout (destroy). Sin signup público — el primer
+# admin se crea desde /setup (o `bin/rails users:create` por CLI), los
+# siguientes los crea ese admin desde /settings. Mikhael es asistente
+# personal/familiar, no SaaS.
 class SessionsController < ApplicationController
   allow_unauthenticated_access only: %i[new create]
 
@@ -19,7 +20,10 @@ class SessionsController < ApplicationController
              only:   :create
 
   def new
-    redirect_to root_path if user_signed_in?
+    return redirect_to root_path if user_signed_in?
+    # DB vacía → no hay con quién loguearse. Mandamos al wizard de setup
+    # para que el primer admin pueda crearse desde el browser.
+    redirect_to setup_path unless User.exists?
   end
 
   def create

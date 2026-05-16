@@ -6,7 +6,8 @@ RSpec.describe "Sessions", type: :request do
   let(:user) { create(:user, :admin, password: "supersecret123456") }
 
   describe "GET /session/new" do
-    it "muestra el form de login" do
+    it "muestra el form de login (con users en la DB)" do
+      user # crea el user antes — sin esto cae al setup wizard
       get new_session_path
       expect(response).to have_http_status(:ok)
       expect(response.body).to include("Iniciá sesión")
