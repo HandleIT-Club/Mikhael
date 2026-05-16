@@ -45,8 +45,12 @@ class ToolCallExecutor
     )\b
   /xi.freeze
 
-  def initialize(user_message:, surface: :web)
+  # Recibe el user explícito porque este service corre tanto desde
+  # MessagesController (con Current.user) como desde el TelegramPollJob (donde
+  # Current.user no está seteado — lo resolvemos por chat_id en el handler).
+  def initialize(user_message:, user:, surface: :web)
     @user_message = user_message.to_s
+    @user         = user
     @surface      = surface
   end
 
@@ -171,7 +175,7 @@ class ToolCallExecutor
       return nil  # silencio total — el primer mensaje ya fue
     end
 
-    reminder = Reminder.new(scheduled_for: scheduled_for, message: message, kind: kind, device_id: device_id)
+    reminder = @user.reminders.new(scheduled_for: scheduled_for, message: message, kind: kind, device_id: device_id)
 
     if reminder.save
       ExecuteReminderJob.set(wait_until: reminder.scheduled_for).perform_later(reminder.id)
@@ -192,11 +196,12 @@ class ToolCallExecutor
     "Recordatorio ##{reminder.id} programado para el #{formatted}: #{reminder.message}"
   end
 
+  # Dedup scoped al user — dos users con el mismo recordatorio no se pisan.
   def recent_duplicate(message, scheduled_for)
-    Reminder.where(message: message, executed_at: nil)
-            .where("scheduled_for BETWEEN ? AND ?", scheduled_for - 1.minute, scheduled_for + 1.minute)
-            .where("created_at > ?", 30.seconds.ago)
-            .first
+    @user.reminders.where(message: message, executed_at: nil)
+                   .where("scheduled_for BETWEEN ? AND ?", scheduled_for - 1.minute, scheduled_for + 1.minute)
+                   .where("created_at > ?", 30.seconds.ago)
+                   .first
   end
 
   def time_unreadable_reply(raw)

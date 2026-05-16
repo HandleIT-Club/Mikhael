@@ -1,5 +1,6 @@
 FactoryBot.define do
   factory :reminder do
+    user
     message       { "Revisar el riego" }
     scheduled_for { 2.hours.from_now }
     kind          { "notify" }

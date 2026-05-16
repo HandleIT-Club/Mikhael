@@ -5,8 +5,8 @@ class ConversationsController < ApplicationController
   before_action :set_conversation, only: %i[show destroy update]
 
   def index
-    @conversations = Conversation.visible.recent
-    @conversation  = Conversation.new
+    @conversations = current_user.conversations.visible.recent
+    @conversation  = current_user.conversations.new
   end
 
   def show
@@ -15,12 +15,12 @@ class ConversationsController < ApplicationController
   end
 
   def create
-    @conversation = Conversation.new(conversation_params)
+    @conversation = current_user.conversations.new(conversation_params)
 
     if @conversation.save
       redirect_to @conversation
     else
-      @conversations = Conversation.visible.recent
+      @conversations = current_user.conversations.visible.recent
       render :index, status: :unprocessable_entity
     end
   end
@@ -40,8 +40,10 @@ class ConversationsController < ApplicationController
 
   private
 
+  # Scoping CRÍTICO: solo dejamos ver/editar conversaciones del current_user.
+  # Esto previene que un user vea conversaciones de otro modificando el URL.
   def set_conversation
-    @conversation = Conversation.visible.find(params[:id])
+    @conversation = current_user.conversations.visible.find(params[:id])
   end
 
   def conversation_params

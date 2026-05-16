@@ -6,14 +6,10 @@ class TelegramPollJob < ApplicationJob
 
   POLL_INTERVAL = 2.seconds
   OFFSET_KEY    = "telegram_poll_offset".freeze
-  ALLOWED_CHAT  = ENV["TELEGRAM_CHAT_ID"].freeze
 
   def perform
     return unless TelegramClient.configured?
 
-    # Persistimos el offset en DB (modelo Setting) en vez de Rails.cache —
-    # el cache de dev es :memory_store y se borra en cada reinicio, lo que
-    # hacía que Telegram nos devolviera mensajes ya procesados al arrancar.
     offset   = Setting.get(OFFSET_KEY)&.to_i
     response = TelegramClient.get_updates(offset: offset)
 
@@ -29,17 +25,26 @@ class TelegramPollJob < ApplicationJob
 
   private
 
+  # Multi-user: resolvemos User por telegram_chat_id. Si el chat_id no está
+  # linkeado a ningún user, ignoramos el mensaje (igual logueamos un warn
+  # para que el admin sepa que llegó algo de fuera).
   def process(update)
     message = update["message"] || update["edited_message"]
     return unless message
 
-    return unless message.dig("chat", "id").to_s == ALLOWED_CHAT
-
-    text = message["text"].to_s.strip
+    chat_id = message.dig("chat", "id").to_s
+    text    = message["text"].to_s.strip
     return if text.empty?
 
-    TelegramMessageHandler.new.call(text)
+    user = User.find_by(telegram_chat_id: chat_id)
+
+    unless user
+      Rails.logger.warn("TelegramPollJob: chat_id=#{chat_id} no está linkeado a ningún User. Ignorando: #{text.first(40).inspect}")
+      return
+    end
+
+    TelegramMessageHandler.new(user: user, chat_id: chat_id).call(text)
   rescue => e
-    Rails.logger.error("TelegramPollJob#process: #{e.message}")
+    Rails.logger.error("TelegramPollJob#process: #{e.class} — #{e.message}")
   end
 end

@@ -2,6 +2,7 @@
 # Copyright (C) 2026 Nicolás S. Navarro
 # Licensed under AGPL-3.0 — https://www.gnu.org/licenses/agpl-3.0.html
 class Conversation < ApplicationRecord
+  belongs_to :user
   has_many :messages, dependent: :destroy
 
   CLOUD_MODELS = {

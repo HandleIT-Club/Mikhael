@@ -4,7 +4,8 @@
 module Api
   module V1
     class HeartbeatsController < BaseController
-      skip_before_action :require_app_password
+      # Igual que ActionsController: este endpoint usa Device token, no User.
+      skip_before_action :authenticate_user_via_api_token!
       before_action :authenticate_device
 
       # POST /api/v1/heartbeat

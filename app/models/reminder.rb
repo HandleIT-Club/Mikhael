@@ -3,6 +3,7 @@
 # Licensed under AGPL-3.0 — https://www.gnu.org/licenses/agpl-3.0.html
 
 class Reminder < ApplicationRecord
+  belongs_to :user
   belongs_to :device, optional: true
 
   enum :kind, { notify: "notify", query_device: "query_device" }, validate: true

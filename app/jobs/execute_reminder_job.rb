@@ -4,6 +4,10 @@
 
 # Ejecuta un Reminder en el momento programado.
 #
+# Multi-user: cada Reminder es de un User. La notificación va al
+# telegram_chat_id de su owner. Si el user no tiene chat_id linkeado,
+# logueamos un warn (no podemos avisarle).
+#
 # Idempotente: si executed_at ya está seteado, no hace nada.
 # Tolerante a errores: un device_id inválido o un fallo de AI loguea y marca
 # el reminder como ejecutado (no se reintenta indefinidamente).
@@ -27,27 +31,33 @@ class ExecuteReminderJob < ApplicationJob
     reminder.update!(executed_at: Time.current)
   rescue => e
     Rails.logger.error("ExecuteReminderJob#perform(#{reminder_id}): #{e.class} — #{e.message}")
-    # Marcamos como ejecutado para no reintentar en bucle; el error ya fue logueado.
     reminder&.update(executed_at: Time.current)
   end
 
   private
 
   def execute(reminder)
+    chat_id = reminder.user.telegram_chat_id
+
+    unless chat_id.present?
+      Rails.logger.warn("ExecuteReminderJob: user ##{reminder.user_id} no tiene telegram_chat_id — no se puede notificar reminder ##{reminder.id}")
+      return
+    end
+
     case reminder.kind
     when "notify"
-      TelegramClient.send_message("⏰ *Recordatorio:* #{reminder.message}")
+      TelegramClient.send_message("⏰ *Recordatorio:* #{reminder.message}", chat_id: chat_id)
     when "query_device"
-      execute_device_query(reminder)
+      execute_device_query(reminder, chat_id)
     end
   end
 
-  def execute_device_query(reminder)
+  def execute_device_query(reminder, chat_id)
     device = Device.find_by(id: reminder.device_id)
 
     unless device
       Rails.logger.error("ExecuteReminderJob: device_id=#{reminder.device_id} no encontrado para reminder ##{reminder.id}")
-      TelegramClient.send_message("⏰ ❌ No se encontró el dispositivo para el recordatorio: _#{reminder.message}_")
+      TelegramClient.send_message("⏰ ❌ No se encontró el dispositivo para el recordatorio: _#{reminder.message}_", chat_id: chat_id)
       return
     end
 
@@ -58,9 +68,9 @@ class ExecuteReminderJob < ApplicationJob
         msg  = "⏰ *#{device.name}* → `#{response[:action]}`"
         msg += "\nValor: #{response[:value]}" if response[:value]
         msg += "\n_#{response[:reason]}_"
-        TelegramClient.send_message(msg)
+        TelegramClient.send_message(msg, chat_id: chat_id)
       },
-      ->(_) { TelegramClient.send_message("⏰ ❌ No se pudo consultar *#{device.name}*: _#{reminder.message}_") }
+      ->(_) { TelegramClient.send_message("⏰ ❌ No se pudo consultar *#{device.name}*: _#{reminder.message}_", chat_id: chat_id) }
     )
   end
 end

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_15_071158) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_16_004122) do
   create_table "conversations", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.boolean "hidden", default: false, null: false
@@ -19,6 +19,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_15_071158) do
     t.string "system_prompt_fingerprint"
     t.string "title"
     t.datetime "updated_at", null: false
+    t.integer "user_id", null: false
+    t.index ["user_id"], name: "index_conversations_on_user_id"
   end
 
   create_table "devices", force: :cascade do |t|
@@ -62,17 +64,37 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_15_071158) do
     t.text "message", null: false
     t.datetime "scheduled_for", null: false
     t.datetime "updated_at", null: false
+    t.integer "user_id", null: false
     t.index ["executed_at"], name: "index_reminders_on_executed_at"
     t.index ["scheduled_for"], name: "index_reminders_on_scheduled_for"
+    t.index ["user_id"], name: "index_reminders_on_user_id"
   end
 
   create_table "settings", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "key", null: false
     t.datetime "updated_at", null: false
+    t.integer "user_id"
     t.text "value"
-    t.index ["key"], name: "index_settings_on_key", unique: true
+    t.index ["user_id", "key"], name: "index_settings_on_user_id_and_key", unique: true
+    t.index ["user_id"], name: "index_settings_on_user_id"
   end
 
+  create_table "users", force: :cascade do |t|
+    t.boolean "admin", default: false, null: false
+    t.string "api_token", null: false
+    t.datetime "created_at", null: false
+    t.string "email", null: false
+    t.string "password_digest", null: false
+    t.string "telegram_chat_id"
+    t.datetime "updated_at", null: false
+    t.index ["api_token"], name: "index_users_on_api_token", unique: true
+    t.index ["email"], name: "index_users_on_email", unique: true
+    t.index ["telegram_chat_id"], name: "index_users_on_telegram_chat_id", unique: true
+  end
+
+  add_foreign_key "conversations", "users"
   add_foreign_key "messages", "conversations"
+  add_foreign_key "reminders", "users"
+  add_foreign_key "settings", "users"
 end

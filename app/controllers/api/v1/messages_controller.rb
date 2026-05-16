@@ -6,8 +6,8 @@ module Api
     class MessagesController < BaseController
       rate_limit to:     ENV.fetch("RATE_LIMIT_MESSAGES_PER_MIN", "30").to_i,
                  within: 1.minute,
-                 by:     -> { request.remote_ip },
-                 with:   -> { render_rate_limit_exceeded(30, identifier: request.remote_ip) },
+                 by:     -> { Current.user&.id ? "u:#{Current.user.id}" : "ip:#{request.remote_ip}" },
+                 with:   -> { render_rate_limit_exceeded(30, identifier: Current.user&.id&.to_s || request.remote_ip) },
                  store:  RATE_LIMIT_STORE,
                  only:   :create
 
@@ -28,7 +28,7 @@ module Api
       private
 
       def set_conversation
-        @conversation = Conversation.find(params[:conversation_id])
+        @conversation = Current.user.conversations.find(params[:conversation_id])
       end
 
       def error_status(error)

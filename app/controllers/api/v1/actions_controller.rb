@@ -4,7 +4,9 @@
 module Api
   module V1
     class ActionsController < BaseController
-      skip_before_action :require_app_password
+      # Este endpoint NO usa user API token — usa el Device token (los devices
+      # ESP32 no son users, son hardware con su propio Bearer token).
+      skip_before_action :authenticate_user_via_api_token!
 
       # Rate limit por token: cada dispositivo tiene su propio contador.
       # Corre antes de authenticate_device para proteger también contra tokens inválidos.
@@ -40,13 +42,20 @@ module Api
         render json: { error: "Token inválido" }, status: :unauthorized unless @device
       end
 
+      # Notifica a TODOS los admins con telegram_chat_id linkeado. Los devices
+      # son recursos compartidos del hogar — todos los admins quieren saber
+      # cuando un device hace algo. Si el día de mañana querés notificar solo
+      # a uno, se puede agregar Device#notify_user.
       def notify_telegram(device, response)
         return unless response[:action].present?
-        emoji  = response[:requires_confirmation] ? "⚠️" : "📡"
-        text   = "#{emoji} *#{device.name}* → `#{response[:action]}`"
-        text  += "\nValor: #{response[:value]}" if response[:value]
-        text  += "\n_#{response[:reason]}_"
-        TelegramClient.send_message(text)
+        emoji = response[:requires_confirmation] ? "⚠️" : "📡"
+        text  = "#{emoji} *#{device.name}* → `#{response[:action]}`"
+        text += "\nValor: #{response[:value]}" if response[:value]
+        text += "\n_#{response[:reason]}_"
+
+        User.where(admin: true).where.not(telegram_chat_id: nil).find_each do |admin|
+          TelegramClient.send_message(text, chat_id: admin.telegram_chat_id)
+        end
       end
 
       def error_status(error)

@@ -1,17 +1,22 @@
 # Mikhael — Personal AI Assistant
 # Copyright (C) 2026 Nicolás S. Navarro
 # Licensed under AGPL-3.0 — https://www.gnu.org/licenses/agpl-3.0.html
+#
+# Wrapper HTTP sobre la API del bot de Telegram. NO sabe nada de users —
+# el caller es el que pasa el chat_id correcto.
 class TelegramClient
-  BASE    = "https://api.telegram.org"
-  CHAT_ID = ENV["TELEGRAM_CHAT_ID"]
+  BASE = "https://api.telegram.org"
 
   def self.configured?
-    ENV["TELEGRAM_BOT_TOKEN"].present? && CHAT_ID.present?
+    ENV["TELEGRAM_BOT_TOKEN"].present?
   end
 
-  def self.send_message(text)
+  # Multi-user: chat_id es obligatorio. Antes era global desde ENV; ahora
+  # cada user tiene su propio telegram_chat_id y el caller lo pasa.
+  def self.send_message(text, chat_id:)
     return unless configured?
-    post("sendMessage", { chat_id: CHAT_ID, text: text, parse_mode: "Markdown" })
+    return unless chat_id.present?
+    post("sendMessage", { chat_id: chat_id, text: text, parse_mode: "Markdown" })
   end
 
   def self.get_updates(offset: nil)
@@ -34,9 +39,6 @@ class TelegramClient
     uri = URI("#{BASE}/bot#{ENV['TELEGRAM_BOT_TOKEN']}/#{method}")
     res = Net::HTTP.post(uri, body.to_json, "Content-Type" => "application/json")
     parsed = JSON.parse(res.body)
-    # Telegram devuelve 200 OK pero {"ok": false, "description": "..."} cuando
-    # rechaza el contenido (ej: Markdown mal parseado por un "_" suelto). Sin
-    # este log el error es silencioso y la respuesta nunca llega al usuario.
     unless parsed["ok"]
       Rails.logger.error("Telegram POST #{method} rechazado: #{parsed.inspect} — body=#{body.inspect}")
     end

@@ -21,7 +21,7 @@ fallback automático entre proveedores, o **completamente offline** con Ollama.
 ![Hotwire](https://img.shields.io/badge/Hotwire-Turbo-8b5cf6?style=flat-square)
 ![Telegram](https://img.shields.io/badge/Telegram-Bot-26A5E4?style=flat-square&logo=telegram&logoColor=white)
 ![MQTT](https://img.shields.io/badge/MQTT-IoT-660066?style=flat-square)
-![Tests](https://img.shields.io/badge/Tests-243%20passing-22c55e?style=flat-square)
+![Tests](https://img.shields.io/badge/Tests-240%20passing-22c55e?style=flat-square)
 ![License](https://img.shields.io/badge/Licencia-AGPL--3.0-blue?style=flat-square)
 
 </div>
@@ -80,8 +80,13 @@ Cargás un dispositivo en Mikhael (por ejemplo *"ESP32 Riego"*) con su lista de 
   que se desvían del esquema.
 - **Modo agente en el CLI**: Mikhael propone comandos shell y los ejecuta con tu confirmación,
   para que lo uses como pair programmer en la terminal.
-- **Auth opcional a nivel app** (`MIKHAEL_PASSWORD`) si vas a exponer Mikhael fuera de
-  localhost.
+- **Multi-user con autenticación real**: cada miembro de la familia tiene su email + password,
+  sus propias conversaciones, recordatorios y zona horaria. Los dispositivos IoT son
+  compartidos (hogar). Sin signup público — solo el admin crea cuentas vía CLI. Brute-force
+  protection en el login, secure session cookies, scoping estricto entre users.
+- **API token por user**: cada user tiene su `api_token` (256-bit, regenerable). El CLI y
+  apps externas autentican con `Authorization: Bearer <token>`. Tokens de Device (para
+  ESP32) siguen siendo independientes.
 - **AGPL-3.0**: software libre, copyleft.
 
 ---
@@ -124,6 +129,33 @@ Ollama (lo que tengas instalado localmente)
 
 ---
 
+## Upgrading desde la versión single-user
+
+Si venís de la versión vieja (sin users), Mikhael ahora es multi-user. La estructura de
+datos cambió de raíz: `conversations`, `reminders` y algunos `settings` ahora pertenecen
+a un user. **No hay migración automática** — pasos del upgrade:
+
+```bash
+git pull
+bundle install
+bin/rails db:drop db:create db:migrate
+bin/rails users:create EMAIL=tu@email.com PASSWORD=algo_de_12_chars
+```
+
+Si querés que ese user reciba los mensajes del bot de Telegram:
+
+```bash
+bin/rails users:create EMAIL=tu@email.com PASSWORD=algo_de_12_chars TELEGRAM_CHAT_ID=tu_chat_id
+```
+
+El comando imprime el `api_token` — pegalo en tu `~/.mikhaelrc` o donde tengas la config
+del CLI.
+
+`MIKHAEL_PASSWORD` ya no existe. Login es por email/password con session cookie en web,
+o `Authorization: Bearer <api_token>` en API.
+
+---
+
 ## Instalación
 
 Lo mínimo que necesitás es **Ruby 3.4.2** y una **API key gratuita de Groq**. Todo lo demás
@@ -158,7 +190,7 @@ sudo apt install sqlite3 libsqlite3-dev
 Andá a **[console.groq.com](https://console.groq.com)**, creá cuenta (gratis, sin tarjeta),
 generá una API key y guardala. La vamos a usar en un toque.
 
-#### Cloná Mikhael e instalá
+#### Cloná Mikhael, instalá, creá tu user
 
 ```bash
 git clone https://github.com/HandleIT-Club/Mikhael.git
@@ -166,15 +198,21 @@ cd Mikhael
 bundle install
 cp .env.example .env
 bin/rails db:prepare
+
+# Bootstrap: creá tu user admin (signup público no existe, todo va por consola)
+bin/rails users:create EMAIL=tu@email.com PASSWORD=algo_de_12_chars_mínimo
 ```
 
-Abrí el archivo `.env` y pegá tu API key:
+El último comando imprime tu `api_token` — guardalo, lo necesita el CLI para
+autenticar (`Authorization: Bearer <token>`).
+
+Abrí el archivo `.env` y pegá tu API key de Groq:
 
 ```env
 GROQ_API_KEY=gsk_xxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-¡Listo! Arrancá con `bin/dev` y abrí [http://localhost:3000](http://localhost:3000).
+¡Listo! Arrancá con `bin/dev`, abrí [http://localhost:3000](http://localhost:3000) y logueate.
 
 ### 2) Comando `mikhael` en tu terminal (recomendado)
 
@@ -945,30 +983,41 @@ ejecutar.
 
 | Origen | Trusted | requires_confirmation en high-sec |
 |---|---|---|
-| Telegram (chat_id verificado) | ✅ | No |
-| Web/CLI (con MIKHAEL_PASSWORD) | ✅ | No |
+| Telegram (chat_id linkeado a un User) | ✅ | No |
+| Web (sesión iniciada) | ✅ | No |
+| CLI con `Authorization: Bearer <user_api_token>` | ✅ | No |
 | ESP32 reportando sensores | ⚠️ | Sí |
 
-### Si vas a exponer Mikhael a internet
+### Autenticación multi-user
 
-**Hay que activar `MIKHAEL_PASSWORD`.** Sin eso, las rutas de gestión (`/api/v1/devices`,
-`/api/v1/conversations`, etc.) quedan abiertas a cualquiera que descubra tu IP, y un
-escáner como Shodan las encuentra en horas.
+Mikhael tiene autenticación real con users (email + password). Las cuentas las crea el
+admin **vía consola** — no hay signup público porque es un asistente personal/familiar,
+no SaaS:
 
-```env
-MIKHAEL_PASSWORD=algo_largo_y_random
+```bash
+bin/rails users:create EMAIL=tu@email.com PASSWORD=algo_de_12_chars_minimo
+# Opcional: TELEGRAM_CHAT_ID=12345  (para que ese user reciba mensajes del bot)
 ```
 
-Con eso:
-- 🌐 Todas las rutas web piden HTTP Basic Auth
-- 🔌 Todas las rutas `/api/v1/*` excepto `/api/v1/action` piden HTTP Basic Auth
-- 📡 `/api/v1/action` queda **solo** con auth por token de device (los dispositivos no
-  saben de basic auth, solo de su Bearer token)
+El comando imprime el `api_token` del user — guardalo, lo necesita el CLI para autenticar
+contra `/api/v1/*`. Si lo perdés:
 
-### Lo que NO está cubierto
+```bash
+bin/rails users:regenerate_token EMAIL=tu@email.com
+```
 
-- ❌ **Multi-usuario** — Mikhael asume un usuario. Si querés varios usuarios con sus
-  propias conversaciones, vas a tener que agregar un modelo `User` y particionar todo.
+**Modelo de scoping:**
+- Per-user: conversaciones, recordatorios, zona horaria, api_token, telegram_chat_id
+- Compartidos (hogar): dispositivos IoT, ModelConfig
+
+**Hardening:**
+- `has_secure_password` (bcrypt). Mínimo 12 caracteres.
+- Brute-force protection en login: 5 intentos por minuto por IP (configurable
+  con `RATE_LIMIT_LOGIN_PER_MIN`). Después, 429.
+- Mensaje genérico ("Email o contraseña incorrectos") para no revelar si el email existe.
+- `reset_session` en cada login para prevenir session fixation.
+- Cookie de sesión: `httponly`, `secure` en producción, `same_site: :lax`.
+- Rate limiting por user_id cuando hay sesión (y por IP cuando no).
 
 ### Buenas prácticas recomendadas
 
@@ -1071,6 +1120,15 @@ app/
 - **Offset del polling persistente**: el `TelegramPollJob` guarda el offset en `Setting`
   (DB) en vez de `Rails.cache` (memoria volátil en dev). Reinicios del server ya no
   re-procesan mensajes viejos.
+- **Multi-user con signup cerrado**: el admin crea cuentas vía CLI. Sin signup público
+  porque Mikhael no es SaaS. Sessions con `httponly` + `secure` cookies, brute-force
+  protection en login (rate_limit por IP), per-user rate limiting cuando hay user
+  identificable. Devices son shared (hogar); conversaciones, recordatorios y zona horaria
+  son per-user.
+- **Conversación de Telegram identificada por user+title, no por cache**: antes la
+  conversación se identificaba por una key en Rails.cache (que se borra en restart).
+  Ahora es `user.conversations.where(title: "Telegram").first` — determinístico, sin
+  dependencia de cache, multi-user-safe.
 
 ---
 
@@ -1080,17 +1138,20 @@ app/
 bundle exec rspec
 ```
 
-**243 ejemplos** cubriendo:
+**240 ejemplos** cubriendo:
 
 - **Unit specs** (services, models, jobs): `AssistantContext`, `CommandRouter`,
   `MessageIntentRouter`, `ToolCallExecutor`, `UserTimezone`, `Setting`, `Reminder`,
-  `ExecuteReminderJob`, dispatcher AI, OllamaModels, ModelSelector.
-- **Request specs**: API JSON (actions, conversations, messages, devices, heartbeat,
-  models), rate limiting, web `MessagesController` (commands + intents + tool execution),
-  endpoint `PATCH /timezone`.
+  `User` (auth, scoping, api_token), `ExecuteReminderJob`, dispatcher AI, OllamaModels,
+  ModelSelector.
+- **Request specs**: Sessions (login/logout/CSRF/return_to/fixation), API JSON con Bearer
+  token (actions, conversations, messages, devices, heartbeat, models — incluyendo
+  scoping cross-user de 404), rate limiting per-user, web `MessagesController` (commands +
+  intents + tool execution), endpoint `PATCH /timezone`.
 - **System specs** (Capybara + Cuprite, Chrome headless): flujos reales en browser —
-  slash commands, intent router, ejecución de tool calls del AI, fallback de recordatorios.
-  No mockean al user — tipean en el form y verifican que la DB cambió.
+  login + logout, slash commands, intent router, ejecución de tool calls del AI, fallback
+  de recordatorios, scoping cross-user (Alice no ve datos de Bob). No mockean al user —
+  tipean en el form y verifican que la DB cambió.
 
 ```bash
 bundle exec rspec spec/system  # solo browser tests

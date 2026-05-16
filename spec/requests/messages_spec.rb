@@ -1,7 +1,8 @@
 require "rails_helper"
 
 RSpec.describe "Web MessagesController", type: :request do
-  let(:conversation) { create(:conversation) }
+  let(:user)         { create(:user) }
+  let(:conversation) { create(:conversation, user: user) }
   let(:mock_client)  { instance_double(Ai::RubyLlmClient) }
   let(:ai_content)   { "respuesta del AI" }
   let(:ai_response)  { AiResponse.new(content: ai_content, model: "m", provider: "p") }
@@ -15,6 +16,8 @@ RSpec.describe "Web MessagesController", type: :request do
     allow(Turbo::StreamsChannel).to receive(:broadcast_update_to)
     allow(Turbo::StreamsChannel).to receive(:broadcast_replace_to)
     allow(Turbo::StreamsChannel).to receive(:broadcast_remove_to)
+
+    sign_in_as(user)
   end
 
   def post_message(text)
@@ -34,12 +37,12 @@ RSpec.describe "Web MessagesController", type: :request do
 
     it "/zona setea la zona y persiste la confirmación" do
       post_message("/zona Buenos Aires")
-      expect(Setting.get("user_timezone")).to eq("Buenos Aires")
+      expect(Setting.get_for(user, "user_timezone")).to eq("Buenos Aires")
       expect(conversation.messages.last.content).to match(/configurada/i)
     end
 
-    it "/recordatorios lista los pendientes" do
-      create(:reminder, message: "test")
+    it "/recordatorios lista los pendientes del user" do
+      create(:reminder, user: user, message: "test")
       post_message("/recordatorios")
       expect(conversation.messages.last.content).to include("test")
     end

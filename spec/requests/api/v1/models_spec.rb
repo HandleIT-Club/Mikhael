@@ -1,7 +1,8 @@
 require "rails_helper"
 
 RSpec.describe "Api::V1::Models", type: :request do
-  let(:headers) { { "Accept" => "application/json" } }
+  let(:user)    { create(:user) }
+  let(:headers) { { "Accept" => "application/json", "Authorization" => "Bearer #{user.api_token}" } }
 
   before do
     allow(OllamaModels).to receive(:installed).and_return([])

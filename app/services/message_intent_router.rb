@@ -44,7 +44,7 @@ class MessageIntentRouter
   end
 
   def self.timezone_explicitly_set?
-    Setting.get(UserTimezone::SETTING_KEY).present? || ENV["MIKHAEL_TZ"].present?
+    (Current.user && Setting.get_for(Current.user, UserTimezone::SETTING_KEY).present?) || ENV["MIKHAEL_TZ"].present?
   end
 
   # ─── Dispositivos ─────────────────────────────────────────────────────────

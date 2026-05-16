@@ -22,6 +22,11 @@ RSpec.configure do |config|
   # Limpiamos el store de rate limiting entre tests para que los contadores
   # de un test no afecten al siguiente.
   config.before { RATE_LIMIT_STORE.clear }
+
+  # Reset Current.user entre tests para que el state thread-local no se
+  # filtre. CurrentAttributes hace esto automáticamente entre requests
+  # vía middleware, pero entre specs (que no son requests) hay que limpiarlo.
+  config.before { Current.reset }
 end
 
 Shoulda::Matchers.configure do |config|

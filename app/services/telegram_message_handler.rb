@@ -2,42 +2,60 @@
 # Copyright (C) 2026 Nicolás S. Navarro
 # Licensed under AGPL-3.0 — https://www.gnu.org/licenses/agpl-3.0.html
 
-# Shim delgado sobre los services compartidos (CommandRouter, MessageIntentRouter,
-# ToolCallExecutor, AssistantContext). Su única responsabilidad surface-específica
-# es: gestionar la conversación cacheada de Telegram + enviar las respuestas vía
-# TelegramClient.
+# Shim delgado sobre los services compartidos. Su única responsabilidad
+# surface-específica es: gestionar la conversación de Telegram del user +
+# enviar las respuestas vía TelegramClient.
 #
-# Toda la lógica de dominio (qué hace cada comando, qué intercepta, qué hacen
-# los tools) está en los services compartidos. La misma lógica corre en web vía
-# MessagesController.
+# Multi-user: el handler recibe el chat_id, resuelve User#find_by(telegram_chat_id:),
+# y todo el flujo corre scoped a ese user. Si el chat_id no está linkeado a
+# ningún user, ignoramos el mensaje.
+#
+# La conversación de Telegram se identifica por user_id + title="Telegram"
+# (no por un cache externo). Robusto contra restart del cache, sin race
+# conditions, fácil de testear.
 class TelegramMessageHandler
-  CONV_CACHE_KEY = "telegram_conversation_id".freeze
+  TELEGRAM_CONV_TITLE = "Telegram".freeze
+
+  def initialize(user:, chat_id:)
+    @user    = user
+    @chat_id = chat_id
+  end
 
   def call(text)
+    return unless @user # defensa: el caller debería haber filtrado
+
+    Current.user = @user
+
     stripped = text.to_s.strip
-    router   = CommandRouter.new(stripped)
+    router   = CommandRouter.new(stripped, user: @user)
 
     if router.reset_command?
       reset_conversation
-      return TelegramClient.send_message("✅ Conversación reiniciada.")
+      return send_message("✅ Conversación reiniciada.")
     end
 
     if (cmd = router.handle)
-      return TelegramClient.send_message(cmd.reply)
+      return send_message(cmd.reply)
     end
 
     if (intent = MessageIntentRouter.intercept(stripped))
-      return TelegramClient.send_message(intent.reply)
+      return send_message(intent.reply)
     end
 
     handle_chat(stripped)
+  ensure
+    Current.user = nil
   end
 
   private
 
+  def send_message(text)
+    TelegramClient.send_message(text, chat_id: @chat_id)
+  end
+
   def handle_chat(text)
     conversation = find_or_create_conversation
-    return TelegramClient.send_message("❌ No hay modelos disponibles.") unless conversation
+    return send_message("❌ No hay modelos disponibles.") unless conversation
 
     context = AssistantContext.for(:telegram)
     result  = CreateMessage.new.call(
@@ -49,37 +67,32 @@ class TelegramMessageHandler
 
     result.either(
       ->(response) { handle_ai_response(response, text) },
-      ->(error)    { TelegramClient.send_message("❌ Error: #{error}") }
+      ->(error)    { send_message("❌ Error: #{error}") }
     )
   end
 
-  # Único side-effect surface-específico tras la respuesta del AI: enviar a
-  # Telegram. Toda la lógica de qué responder vive en ToolCallExecutor.
   def handle_ai_response(ai_response, user_message)
-    executor = ToolCallExecutor.new(user_message: user_message, surface: :telegram)
+    executor = ToolCallExecutor.new(user_message: user_message, user: @user, surface: :telegram)
     result   = executor.call(ai_response.content)
 
     if result
-      TelegramClient.send_message(result.reply) if result.reply.present?
+      send_message(result.reply) if result.reply.present?
     else
-      TelegramClient.send_message(ai_response.content)
+      send_message(ai_response.content)
     end
   end
 
   def reset_conversation
-    conv_id = Rails.cache.read(CONV_CACHE_KEY)
-    Conversation.find_by(id: conv_id)&.destroy if conv_id
-    Rails.cache.delete(CONV_CACHE_KEY)
+    @user.conversations.where(title: TELEGRAM_CONV_TITLE).destroy_all
   end
 
   def find_or_create_conversation
     context     = AssistantContext.for(:telegram)
     fingerprint = context.fingerprint
-    conv_id     = Rails.cache.read(CONV_CACHE_KEY)
-    conv        = Conversation.find_by(id: conv_id) if conv_id
+    conv        = @user.conversations.where(title: TELEGRAM_CONV_TITLE).first
 
     if conv && conv.system_prompt_fingerprint != fingerprint
-      Rails.logger.info("Telegram: prompt cambió, reseteando conversación ##{conv.id}")
+      Rails.logger.info("Telegram: prompt cambió, reseteando conv ##{conv.id} para user ##{@user.id}")
       conv.destroy
       conv = nil
     end
@@ -89,14 +102,12 @@ class TelegramMessageHandler
     model_id = ModelSelector.first_available
     return nil unless model_id
 
-    conv = Conversation.create!(
-      title:                      "Telegram",
+    @user.conversations.create!(
+      title:                      TELEGRAM_CONV_TITLE,
       model_id:                   model_id,
       provider:                   Conversation.all_models[model_id],
       hidden:                     true,
       system_prompt_fingerprint:  fingerprint
     )
-    Rails.cache.write(CONV_CACHE_KEY, conv.id)
-    conv
   end
 end

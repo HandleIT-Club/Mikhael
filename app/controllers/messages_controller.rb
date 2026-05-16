@@ -15,7 +15,9 @@ class MessagesController < ApplicationController
     cable_append partial: "messages/message", locals: { message: user_msg }
 
     # 2. Slash commands (/zona, /recordatorios, /dispositivos, etc.). Shared con Telegram.
-    return respond_with_text(CommandRouter.handle(content).reply) if CommandRouter.handle(content)
+    if (cmd = CommandRouter.handle(content, user: current_user))
+      return respond_with_text(cmd.reply)
+    end
 
     # 3. Intent router: preguntas determinísticas (hora, estado de devices). Shared con Telegram.
     if (intent = MessageIntentRouter.intercept(content))
@@ -48,7 +50,8 @@ class MessagesController < ApplicationController
   private
 
   def set_conversation
-    @conversation = Conversation.find(params[:conversation_id])
+    # Scoping crítico: solo el dueño puede mandar mensajes a su conversación.
+    @conversation = current_user.conversations.find(params[:conversation_id])
   end
 
   def message_params
@@ -98,7 +101,7 @@ class MessagesController < ApplicationController
     # ejecuta — el AI solo lo sugirió. El mensaje persistido se reescribe con el
     # resultado real para que la conversación tenga el contenido correcto y no
     # JSON crudo.
-    executor   = ToolCallExecutor.new(user_message: user_message, surface: :web)
+    executor    = ToolCallExecutor.new(user_message: user_message, user: current_user, surface: :web)
     tool_result = executor.call(ai_response.content)
 
     assistant_msg = @conversation.messages.where(role: "assistant").last

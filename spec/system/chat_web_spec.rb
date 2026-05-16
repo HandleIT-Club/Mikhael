@@ -9,7 +9,8 @@ require "rails_helper"
 # para probar que el AI dijo X — testeamos que dado el input X, Rails hizo Y.
 
 RSpec.describe "Web chat", type: :system do
-  let(:conversation) { create(:conversation) }
+  let(:user)         { create(:user) }
+  let(:conversation) { create(:conversation, user: user) }
   let(:mock_client)  { instance_double(Ai::RubyLlmClient) }
 
   before do
@@ -21,6 +22,8 @@ RSpec.describe "Web chat", type: :system do
     allow(mock_client).to receive(:stream) do |**_kwargs|
       Dry::Monads::Success(AiResponse.new(content: "ok", model: "m", provider: "p"))
     end
+
+    sign_in_through_form(user)
   end
 
   def send_message(text)
@@ -46,13 +49,13 @@ RSpec.describe "Web chat", type: :system do
       send_message "/zona Buenos Aires"
 
       expect(page).to have_content(/configurada/i)
-      expect(Setting.get("user_timezone")).to eq("Buenos Aires")
+      expect(Setting.get_for(user, "user_timezone")).to eq("Buenos Aires")
     end
   end
 
   describe "intent router determinístico" do
     it "'qué hora es' responde con la hora real desde Ruby, no del AI" do
-      Setting.set("user_timezone", "America/Argentina/Buenos_Aires")
+      Setting.set_for(user, "user_timezone", "America/Argentina/Buenos_Aires")
 
       visit conversation_path(conversation)
       send_message "qué hora es"

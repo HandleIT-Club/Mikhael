@@ -1,7 +1,8 @@
 require "rails_helper"
 
 RSpec.describe "Api::V1::Devices", type: :request do
-  let(:headers) { { "Content-Type" => "application/json", "Accept" => "application/json" } }
+  let(:user)    { create(:user) }
+  let(:headers) { { "Content-Type" => "application/json", "Accept" => "application/json", "Authorization" => "Bearer #{user.api_token}" } }
 
   describe "GET /api/v1/devices" do
     it "devuelve todos los dispositivos sin exponer el token" do

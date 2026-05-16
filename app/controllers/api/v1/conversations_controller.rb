@@ -5,17 +5,17 @@ module Api
   module V1
     class ConversationsController < BaseController
       def index
-        conversations = Conversation.visible.recent
+        conversations = Current.user.conversations.visible.recent
         render json: conversations.map { |c| serialize(c) }
       end
 
       def show
-        conversation = Conversation.visible.find(params[:id])
+        conversation = Current.user.conversations.visible.find(params[:id])
         render json: serialize(conversation, include_messages: true)
       end
 
       def create
-        conversation = Conversation.new(conversation_params)
+        conversation = Current.user.conversations.new(conversation_params)
 
         if conversation.save
           render json: serialize(conversation), status: :created
@@ -25,7 +25,7 @@ module Api
       end
 
       def destroy
-        conversation = Conversation.find(params[:id])
+        conversation = Current.user.conversations.find(params[:id])
         conversation.destroy
         head :no_content
       end

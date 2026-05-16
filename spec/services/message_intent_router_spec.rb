@@ -58,7 +58,11 @@ RSpec.describe MessageIntentRouter do
     end
 
     context "respuesta con TZ configurada" do
-      before { Setting.set("user_timezone", "America/Argentina/Buenos_Aires") }
+      let(:user) { create(:user) }
+      before do
+        Current.user = user
+        Setting.set_for(user, "user_timezone", "America/Argentina/Buenos_Aires")
+      end
 
       it "muestra la hora en la zona del usuario con nombre amigable (sin _)" do
         result = described_class.intercept("qué hora es")
@@ -83,7 +87,9 @@ RSpec.describe MessageIntentRouter do
     end
 
     it "Result tiene reply (lo que ve el usuario) y assistant_persist (lo que se guarda en DB)" do
-      Setting.set("user_timezone", "America/Argentina/Buenos_Aires")
+      user = create(:user)
+      Current.user = user
+      Setting.set_for(user, "user_timezone", "America/Argentina/Buenos_Aires")
       result = described_class.intercept("qué hora es")
       expect(result.reply).to include("🕐")        # con emoji y markdown
       expect(result.assistant_persist).not_to include("🕐")  # versión limpia para el historial

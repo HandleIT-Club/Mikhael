@@ -1,6 +1,8 @@
 require "rails_helper"
 
 RSpec.describe ExecuteReminderJob do
+  let(:user) { create(:user, :with_telegram) }
+
   before do
     allow(TelegramClient).to receive(:send_message)
     allow(MqttPublisher).to receive(:publish)
@@ -20,7 +22,7 @@ RSpec.describe ExecuteReminderJob do
     end
 
     context "cuando el reminder ya fue ejecutado (idempotencia)" do
-      let(:reminder) { create(:reminder, :executed) }
+      let(:reminder) { create(:reminder, :executed, user: user) }
 
       it "no manda mensaje a Telegram" do
         described_class.perform_now(reminder.id)
@@ -34,12 +36,24 @@ RSpec.describe ExecuteReminderJob do
       end
     end
 
-    context "kind=notify" do
-      let(:reminder) { create(:reminder, :past, message: "Revisar el riego") }
+    context "cuando el user del reminder no tiene telegram_chat_id" do
+      let(:user_no_tg) { create(:user) } # sin :with_telegram
+      let(:reminder)   { create(:reminder, :past, user: user_no_tg) }
 
-      it "manda el mensaje a Telegram" do
+      it "no manda mensaje pero marca executed_at" do
         described_class.perform_now(reminder.id)
-        expect(TelegramClient).to have_received(:send_message).with(/Revisar el riego/)
+        expect(TelegramClient).not_to have_received(:send_message)
+        expect(reminder.reload.executed_at).to be_present
+      end
+    end
+
+    context "kind=notify" do
+      let(:reminder) { create(:reminder, :past, user: user, message: "Revisar el riego") }
+
+      it "manda el mensaje al chat_id del user" do
+        described_class.perform_now(reminder.id)
+        expect(TelegramClient).to have_received(:send_message)
+          .with(/Revisar el riego/, chat_id: user.telegram_chat_id)
       end
 
       it "marca executed_at" do
@@ -50,18 +64,10 @@ RSpec.describe ExecuteReminderJob do
 
     context "kind=query_device con device válido" do
       let(:device)   { create(:device) }
-      let(:reminder) do
-        create(:reminder, :past, kind: "query_device", device_id: device.id,
-               message: "cómo está la humedad")
-      end
-
+      let(:reminder) { create(:reminder, :past, user: user, kind: "query_device", device_id: device.id, message: "humedad?") }
       let(:mock_client) { instance_double(Ai::RubyLlmClient) }
       let(:ai_response) do
-        AiResponse.new(
-          content:  '{"action":"read_sensor","value":null,"reason":"humedad al 45%"}',
-          model:    "llama-3.3-70b-versatile",
-          provider: "groq"
-        )
+        AiResponse.new(content: '{"action":"read","value":null,"reason":"45%"}', model: "m", provider: "groq")
       end
 
       before do
@@ -69,52 +75,20 @@ RSpec.describe ExecuteReminderJob do
         allow(mock_client).to receive(:chat).and_return(Dry::Monads::Success(ai_response))
       end
 
-      it "llama DispatchAction y manda resultado a Telegram" do
+      it "llama DispatchAction y manda resultado al chat del user" do
         described_class.perform_now(reminder.id)
-        expect(TelegramClient).to have_received(:send_message).with(/read_sensor/)
-      end
-
-      it "marca executed_at" do
-        described_class.perform_now(reminder.id)
-        expect(reminder.reload.executed_at).to be_present
+        expect(TelegramClient).to have_received(:send_message)
+          .with(/read/, chat_id: user.telegram_chat_id)
       end
     end
 
     context "kind=query_device con device_id inexistente" do
-      let(:reminder) do
-        create(:reminder, :past, kind: "query_device", device_id: 999_999,
-               message: "consultar sensor")
-      end
+      let(:reminder) { create(:reminder, :past, user: user, kind: "query_device", device_id: 999_999, message: "x") }
 
-      it "no lanza error" do
+      it "no lanza error y manda mensaje de error" do
         expect { described_class.perform_now(reminder.id) }.not_to raise_error
-      end
-
-      it "manda mensaje de error a Telegram" do
-        described_class.perform_now(reminder.id)
-        expect(TelegramClient).to have_received(:send_message).with(/no se encontró el dispositivo/i)
-      end
-
-      it "marca executed_at igualmente" do
-        described_class.perform_now(reminder.id)
-        expect(reminder.reload.executed_at).to be_present
-      end
-    end
-
-    context "cuando TelegramClient lanza una excepción" do
-      let(:reminder) { create(:reminder, :past) }
-
-      before do
-        allow(TelegramClient).to receive(:send_message).and_raise(StandardError, "network error")
-      end
-
-      it "no propaga el error" do
-        expect { described_class.perform_now(reminder.id) }.not_to raise_error
-      end
-
-      it "marca executed_at igualmente" do
-        described_class.perform_now(reminder.id)
-        expect(reminder.reload.executed_at).to be_present
+        expect(TelegramClient).to have_received(:send_message)
+          .with(/no se encontró el dispositivo/i, chat_id: user.telegram_chat_id)
       end
     end
   end

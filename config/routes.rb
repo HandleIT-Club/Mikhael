@@ -1,6 +1,8 @@
 Rails.application.routes.draw do
   root "conversations#index"
 
+  resource :session, only: %i[new create destroy]
+
   resources :conversations, only: %i[index show create update destroy] do
     resources :messages, only: %i[create]
   end

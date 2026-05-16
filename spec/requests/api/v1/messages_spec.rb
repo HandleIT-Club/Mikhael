@@ -1,8 +1,9 @@
 require "rails_helper"
 
 RSpec.describe "Api::V1::Messages", type: :request do
-  let(:headers)       { { "Content-Type" => "application/json", "Accept" => "application/json" } }
-  let(:conversation)  { create(:conversation) }
+  let(:user)          { create(:user) }
+  let(:headers)       { { "Content-Type" => "application/json", "Accept" => "application/json", "Authorization" => "Bearer #{user.api_token}" } }
+  let(:conversation)  { create(:conversation, user: user) }
   let(:ai_response)   { AiResponse.new(content: "Hola!", model: "llama-3.3-70b-versatile", provider: "groq") }
   let(:mock_client)   { instance_double(Ai::RubyLlmClient) }
 
