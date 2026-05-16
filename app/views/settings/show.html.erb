@@ -1,0 +1,173 @@
+<% content_for :title, "Configuración" %>
+
+<div class="flex h-screen w-full">
+  <%# Sidebar %>
+  <aside class="w-72 flex-shrink-0 border-r border-zinc-800 flex flex-col">
+    <div class="p-5 border-b border-zinc-800">
+      <%= link_to conversations_path, class: "text-amber-400 font-bold tracking-widest text-sm uppercase hover:text-amber-300 transition-colors" do %>
+        M I K H A E L
+      <% end %>
+    </div>
+
+    <div class="p-4 space-y-2">
+      <%= link_to "← Volver al chat", conversations_path,
+            class: "block w-full py-2 px-4 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm transition-colors text-center" %>
+      <%= link_to "📡 Dispositivos", devices_path,
+            class: "block w-full py-2 px-4 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm transition-colors text-center" %>
+    </div>
+
+    <nav class="flex-1 overflow-y-auto px-4 py-2 space-y-1">
+      <a href="#contexto" class="block px-3 py-2 rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 text-sm transition-colors">⚙ Contexto del asistente</a>
+      <a href="#cuentas"  class="block px-3 py-2 rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 text-sm transition-colors">👥 Cuentas</a>
+    </nav>
+
+    <div class="p-4 border-t border-zinc-800">
+      <p class="text-xs text-zinc-500 uppercase tracking-widest font-medium">Admin</p>
+      <p class="text-xs text-zinc-600 mt-2 leading-relaxed">
+        Solo administradores ven esta página. El contexto se aplica a todas las superficies (web, Telegram, CLI).
+      </p>
+    </div>
+  </aside>
+
+  <%# Main %>
+  <main class="flex-1 overflow-y-auto">
+    <div class="max-w-4xl mx-auto px-8 py-6 space-y-8">
+
+      <%# ─── CONTEXTO DEL ASISTENTE ─────────────────────────────────────── %>
+      <section id="contexto">
+        <div class="mb-4">
+          <h1 class="text-2xl font-thin text-amber-400 tracking-wide">Contexto del asistente</h1>
+          <p class="text-zinc-500 text-sm mt-1">
+            "Preamble" que va al inicio del system prompt. Personalidad, tono, contexto del usuario.
+            Las reglas anti-alucinación, los tools y la lista de dispositivos se agregan automáticamente.
+          </p>
+        </div>
+
+        <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+          <%= form_with url: settings_path, method: :patch, local: true, class: "space-y-3" do |f| %>
+            <%= f.text_area "settings[assistant_preamble]",
+                  rows: 8,
+                  value: @preamble,
+                  class: "w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-amber-500 resize-none font-mono leading-relaxed",
+                  placeholder: AssistantContext::DEFAULT_PREAMBLE %>
+
+            <div class="flex items-center justify-between">
+              <p class="text-xs text-zinc-600">
+                Aplica a todas las superficies. No editar las REGLAS — esas viven en código y protegen contra alucinaciones.
+              </p>
+              <%= f.submit "Guardar contexto",
+                    class: "px-4 py-2 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold rounded-lg text-sm transition-colors cursor-pointer" %>
+            </div>
+          <% end %>
+        </div>
+      </section>
+
+      <%# ─── CUENTAS ─────────────────────────────────────────────────────── %>
+      <section id="cuentas">
+        <div class="mb-4">
+          <h1 class="text-2xl font-thin text-amber-400 tracking-wide">Cuentas</h1>
+          <p class="text-zinc-500 text-sm mt-1">
+            Gestión de usuarios. El API token plain se muestra una sola vez tras crear/regenerar — guardalo.
+          </p>
+        </div>
+
+        <%# Lista de users %>
+        <div class="space-y-3 mb-6">
+          <% @users.each do |user| %>
+            <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <h3 class="text-zinc-100 font-medium truncate"><%= user.email %></h3>
+                    <% if user.admin? %>
+                      <span class="text-xs px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30 font-mono">admin</span>
+                    <% end %>
+                    <% if user == current_user %>
+                      <span class="text-xs px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">vos</span>
+                    <% end %>
+                  </div>
+                  <p class="text-xs text-zinc-500 mt-1">
+                    Telegram: <code class="text-zinc-400"><%= user.telegram_chat_id.presence || "sin vincular" %></code>
+                  </p>
+                </div>
+
+                <div class="flex items-center gap-2 flex-shrink-0">
+                  <%= button_to "Regenerar token", regenerate_token_user_path(user), method: :post,
+                        class: "text-xs px-3 py-1.5 rounded-lg border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 transition-colors cursor-pointer",
+                        data: { turbo_confirm: "Regenerar invalida el token actual de #{user.email}. ¿Continuar?" } %>
+
+                  <% unless user == current_user %>
+                    <%= button_to "Eliminar", user_path(user), method: :delete,
+                          class: "text-xs px-3 py-1.5 rounded-lg border border-red-500/40 text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer",
+                          data: { turbo_confirm: "¿Eliminar a #{user.email}? Esta acción no se puede deshacer." } %>
+                  <% end %>
+                </div>
+              </div>
+
+              <%# Token nuevo (solo se muestra recién creado o regenerado) %>
+              <% if flash[:reveal_user_id] == user.id && flash[:reveal_token] %>
+                <div class="mt-3 p-3 bg-amber-500/5 border border-amber-500/40 rounded-lg space-y-1">
+                  <p class="text-xs text-amber-400 font-medium">⚠ Token nuevo — guardalo, no se vuelve a mostrar.</p>
+                  <code class="block text-xs text-amber-300 font-mono break-all"><%= flash[:reveal_token] %></code>
+                </div>
+              <% end %>
+
+              <%# Toggle admin + vincular Telegram, plegable %>
+              <details class="mt-3">
+                <summary class="text-xs text-zinc-500 hover:text-zinc-300 cursor-pointer select-none">Editar</summary>
+                <%= form_with model: user, url: user_path(user), method: :patch, local: true, class: "mt-3 flex items-center gap-3 flex-wrap" do |f| %>
+                  <label class="flex items-center gap-2 text-xs text-zinc-400">
+                    <%= f.check_box :admin,
+                          checked: user.admin?,
+                          disabled: user == current_user,
+                          class: "rounded border-zinc-700 bg-zinc-950 text-amber-500 focus:ring-amber-500" %>
+                    Admin
+                  </label>
+
+                  <%= f.text_field :telegram_chat_id, value: user.telegram_chat_id,
+                        placeholder: "Telegram chat_id",
+                        class: "flex-1 min-w-[140px] bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-amber-500 font-mono" %>
+
+                  <%= f.submit "Guardar",
+                        class: "px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 text-xs font-medium rounded-lg transition-colors cursor-pointer" %>
+                <% end %>
+              </details>
+            </div>
+          <% end %>
+        </div>
+
+        <%# Form nuevo user %>
+        <div class="bg-zinc-900 border border-zinc-800 border-dashed rounded-xl p-5">
+          <h3 class="text-zinc-400 font-medium text-sm mb-4">+ Nueva cuenta</h3>
+
+          <%= form_with model: @new_user, url: users_path, local: true, class: "space-y-3" do |f| %>
+            <div class="grid grid-cols-2 gap-3">
+              <%= f.email_field :email, placeholder: "alice@example.com", required: true,
+                    autocomplete: "off",
+                    class: "bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-amber-500" %>
+              <%= f.password_field :password, placeholder: "mínimo 12 caracteres", required: true,
+                    autocomplete: "new-password",
+                    class: "bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-amber-500" %>
+            </div>
+
+            <%= f.text_field :telegram_chat_id, placeholder: "Telegram chat_id (opcional)",
+                  class: "w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-amber-500 font-mono" %>
+
+            <div class="flex items-center gap-3">
+              <label class="flex items-center gap-2 text-xs text-zinc-400">
+                <%= f.check_box :admin,
+                      { class: "rounded border-zinc-700 bg-zinc-950 text-amber-500 focus:ring-amber-500" },
+                      "true", "false" %>
+                Crear como admin
+              </label>
+              <div class="flex-1"></div>
+              <%= f.submit "Crear cuenta",
+                    class: "px-4 py-2 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 font-medium rounded-lg text-sm transition-colors cursor-pointer" %>
+            </div>
+          <% end %>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>

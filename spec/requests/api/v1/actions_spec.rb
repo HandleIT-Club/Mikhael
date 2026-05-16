@@ -16,6 +16,7 @@ RSpec.describe "Api::V1::Actions", type: :request do
 
   before do
     allow(OllamaModels).to receive(:installed).and_return([])
+    stub_ai_provider!
     allow(Ai::Dispatcher).to receive(:for).and_return(mock_client)
     allow(mock_client).to receive(:chat).and_return(Dry::Monads::Success(ai_response))
   end

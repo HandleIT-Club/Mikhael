@@ -5,52 +5,21 @@ class MessagesController < ApplicationController
   before_action :set_conversation
 
   def create
-    content = message_params[:content].to_s
-    return handle_failure(:invalid_input) if content.strip.empty?
-
-    original_model = @conversation.model_id
-
-    # 1. Guardar user message y broadcastearlo.
-    user_msg = @conversation.messages.create!(role: "user", content: content)
-    cable_append partial: "messages/message", locals: { message: user_msg }
-
-    # 2. Slash commands (/zona, /recordatorios, /dispositivos, etc.). Shared con Telegram.
-    if (cmd = CommandRouter.handle(content, user: current_user))
-      return respond_with_text(cmd.reply)
-    end
-
-    # 3. Intent router: preguntas determinísticas (hora, estado de devices). Shared con Telegram.
-    if (intent = MessageIntentRouter.intercept(content))
-      return respond_with_text(intent.reply, persist: intent.assistant_persist)
-    end
-
-    # 4. AI con contexto unificado (devices + tools + hora). Streaming.
-    cable_append partial: "messages/streaming_placeholder"
-
-    buffer  = +""
-    context = AssistantContext.for(:web)
-    result  = CreateMessage.new.call(
-      conversation:  @conversation,
-      content:       content,
-      user_message:  user_msg,
-      system_prompt: context.build,
-      primer:        context.primer,
-      on_chunk:      ->(chunk) { buffer << chunk; cable_broadcast_chunk(buffer) }
-    )
-
-    @conversation.reload
-    @model_switched = @conversation.model_id != original_model
+    result = ProcessUserMessage.new(
+      conversation: @conversation,
+      user:         current_user,
+      broadcaster:  ChatBroadcaster.new(@conversation)
+    ).call(message_params[:content])
 
     result.either(
-      ->(ai_response) { handle_success(ai_response, user_message: content) },
-      ->(_error)      { handle_streaming_failure }
+      ->(_outcome)   { head :ok },
+      ->(error)      { handle_failure(error) }
     )
   end
 
   private
 
   def set_conversation
-    # Scoping crítico: solo el dueño puede mandar mensajes a su conversación.
     @conversation = current_user.conversations.find(params[:conversation_id])
   end
 
@@ -58,122 +27,12 @@ class MessagesController < ApplicationController
     params.expect(message: [ :content ])
   end
 
-  # ── Helpers de cable ──────────────────────────────────────────────────────────
-
-  def cable_channel
-    "conversation_#{@conversation.id}"
-  end
-
-  def cable_append(partial:, locals: {})
-    Turbo::StreamsChannel.broadcast_append_to(
-      cable_channel,
-      target:  "messages",
-      partial: partial,
-      locals:  locals
-    )
-  end
-
-  def cable_broadcast_chunk(buffer)
-    Turbo::StreamsChannel.broadcast_update_to(
-      cable_channel,
-      target: "streaming-content",
-      html:   buffer
-    )
-  end
-
-  def cable_replace_placeholder(partial:, locals: {})
-    Turbo::StreamsChannel.broadcast_replace_to(
-      cable_channel,
-      target:  "streaming-message",
-      partial: partial,
-      locals:  locals
-    )
-  end
-
-  def cable_remove_placeholder
-    Turbo::StreamsChannel.broadcast_remove_to(cable_channel, target: "streaming-message")
-  end
-
-  # ── Handlers de resultado ────────────────────────────────────────────────────
-
-  def handle_success(ai_response, user_message:)
-    # Si la respuesta es un tool call (call_device o create_reminder), Rails lo
-    # ejecuta — el AI solo lo sugirió. El mensaje persistido se reescribe con el
-    # resultado real para que la conversación tenga el contenido correcto y no
-    # JSON crudo.
-    executor    = ToolCallExecutor.new(user_message: user_message, user: current_user, surface: :web)
-    tool_result = executor.call(ai_response.content)
-
-    assistant_msg = @conversation.messages.where(role: "assistant").last
-
-    if tool_result
-      if tool_result.reply.present?
-        assistant_msg.update!(content: tool_result.assistant_persist)
-      else
-        # Dedup silencioso (Reminder duplicado) — borramos el placeholder y el
-        # assistant message vacío que el AI generó.
-        assistant_msg&.destroy
-        cable_remove_placeholder
-        return head :ok
-      end
-    end
-
-    maybe_generate_title
-    cable_replace_placeholder(partial: "messages/message", locals: { message: assistant_msg })
-
-    cable_broadcast_model_switch if @model_switched
-
-    if @title_updated
-      Turbo::StreamsChannel.broadcast_update_to(cable_channel, target: "conversation-title",            html: @conversation.title)
-      Turbo::StreamsChannel.broadcast_update_to(cable_channel, target: "conv-title-#{@conversation.id}", html: @conversation.title)
-    end
-
-    head :ok
-  end
-
-  # Para slash commands e intent router: persiste un assistant message y lo
-  # muestra inmediatamente, sin pasar por el AI ni streaming.
-  def respond_with_text(reply_text, persist: nil)
-    assistant_msg = @conversation.messages.create!(role: "assistant", content: persist || reply_text)
-    cable_append partial: "messages/message", locals: { message: assistant_msg }
-    maybe_generate_title
-    head :ok
-  end
-
-  def handle_streaming_failure
-    cable_remove_placeholder
-    # Dejar el user message visible — el error es que la IA no respondió.
-    head :unprocessable_content
-  end
-
   def handle_failure(error)
-    # Solo se llega acá si content está vacío (antes de que se haya guardado el user message).
     @error        = error
     @user_message = @conversation.messages.where(role: "user").last
     respond_to do |format|
-      format.turbo_stream { render "messages/failure" }
-      format.html { redirect_to @conversation, alert: t("errors.ai.#{error}", default: t("errors.ai.default")) }
+      format.turbo_stream { render "messages/failure", status: :unprocessable_content }
+      format.html         { redirect_to @conversation, alert: t("errors.ai.#{error}", default: t("errors.ai.default")) }
     end
-  end
-
-  def maybe_generate_title
-    return unless @conversation.chat_messages.count == 2
-
-    first_content = @conversation.chat_messages.first.content.to_s.strip
-    words = first_content.split
-    title = words.first(8).join(" ")
-    title = title[0..59].rstrip + "…" if title.length > 60
-    title = title.presence || @conversation.title
-
-    @conversation.update(title: title)
-    @title_updated = true
-  end
-
-  def cable_broadcast_model_switch
-    html = ApplicationController.render(
-      partial: "conversations/model_selector",
-      locals:  { conversation: @conversation }
-    )
-    Turbo::StreamsChannel.broadcast_update_to(cable_channel, target: "conversation-model", html: html)
   end
 end

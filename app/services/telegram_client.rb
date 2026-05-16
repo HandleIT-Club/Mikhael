@@ -4,8 +4,12 @@
 #
 # Wrapper HTTP sobre la API del bot de Telegram. NO sabe nada de users —
 # el caller es el que pasa el chat_id correcto.
+#
+# Usa Http::Client con retries automáticos (importante: la red móvil/casera
+# es flaky, y un poll de Telegram que falla por timeout puntual no debería
+# rebotar al usuario).
 class TelegramClient
-  BASE = "https://api.telegram.org"
+  BASE = "https://api.telegram.org".freeze
 
   def self.configured?
     ENV["TELEGRAM_BOT_TOKEN"].present?
@@ -16,7 +20,7 @@ class TelegramClient
   def self.send_message(text, chat_id:)
     return unless configured?
     return unless chat_id.present?
-    post("sendMessage", { chat_id: chat_id, text: text, parse_mode: "Markdown" })
+    post("sendMessage", chat_id: chat_id, text: text, parse_mode: "Markdown")
   end
 
   def self.get_updates(offset: nil)
@@ -26,25 +30,44 @@ class TelegramClient
   end
 
   def self.get(method, params = {})
-    uri       = URI("#{BASE}/bot#{ENV['TELEGRAM_BOT_TOKEN']}/#{method}")
-    uri.query = URI.encode_www_form(params)
-    res       = Net::HTTP.get_response(uri)
-    JSON.parse(res.body)
-  rescue => e
-    Rails.logger.error("Telegram GET #{method}: #{e.message}")
+    response = connection.get(method, params)
+    parse_body(response, method)
+  rescue Faraday::Error => e
+    Rails.logger.error("Telegram GET #{method}: #{e.class} — #{e.message}")
     nil
   end
 
   def self.post(method, body)
-    uri = URI("#{BASE}/bot#{ENV['TELEGRAM_BOT_TOKEN']}/#{method}")
-    res = Net::HTTP.post(uri, body.to_json, "Content-Type" => "application/json")
-    parsed = JSON.parse(res.body)
-    unless parsed["ok"]
-      Rails.logger.error("Telegram POST #{method} rechazado: #{parsed.inspect} — body=#{body.inspect}")
+    response = connection.post(method) do |req|
+      req.headers["Content-Type"] = "application/json"
+      req.body = body.to_json
     end
+    parsed = parse_body(response, method)
+    Rails.logger.error("Telegram POST #{method} rechazado: #{parsed.inspect} — body=#{body.inspect}") if parsed && !parsed["ok"]
     parsed
-  rescue => e
-    Rails.logger.error("Telegram POST #{method}: #{e.message}")
+  rescue Faraday::Error => e
+    Rails.logger.error("Telegram POST #{method}: #{e.class} — #{e.message}")
     nil
+  end
+
+  def self.connection
+    @connection ||= Http::Client.connection(
+      base_url: "#{BASE}/bot#{ENV['TELEGRAM_BOT_TOKEN']}/",
+      timeout: 10,
+      open_timeout: 3
+    )
+  end
+
+  def self.parse_body(response, method)
+    JSON.parse(response.body)
+  rescue JSON::ParserError => e
+    Rails.logger.error("Telegram #{method}: respuesta no es JSON — #{e.message}")
+    nil
+  end
+
+  # Cuando cambia el TELEGRAM_BOT_TOKEN (en tests o config reload) hay que
+  # romper el memo.
+  def self.reset_connection!
+    @connection = nil
   end
 end

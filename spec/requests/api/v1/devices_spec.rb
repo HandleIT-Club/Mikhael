@@ -1,7 +1,8 @@
 require "rails_helper"
 
 RSpec.describe "Api::V1::Devices", type: :request do
-  let(:user)    { create(:user) }
+  # Devices son recursos compartidos del hogar — solo admin los toca.
+  let(:user)    { create(:user, :admin) }
   let(:headers) { { "Content-Type" => "application/json", "Accept" => "application/json", "Authorization" => "Bearer #{user.api_token}" } }
 
   describe "GET /api/v1/devices" do
@@ -81,6 +82,29 @@ RSpec.describe "Api::V1::Devices", type: :request do
         delete "/api/v1/devices/#{device.id}", headers: headers
       }.to change(Device, :count).by(-1)
       expect(response).to have_http_status(:no_content)
+    end
+  end
+
+  describe "autorización" do
+    let(:non_admin)         { create(:user) } # admin=false por default
+    let(:non_admin_headers) { headers.merge("Authorization" => "Bearer #{non_admin.api_token}") }
+
+    it "GET responde 403 a user no-admin" do
+      get "/api/v1/devices", headers: non_admin_headers
+      expect(response).to have_http_status(:forbidden)
+    end
+
+    it "POST responde 403 a user no-admin" do
+      post "/api/v1/devices",
+           params:  { device: { device_id: "x", name: "x", system_prompt: "x" } }.to_json,
+           headers: non_admin_headers
+      expect(response).to have_http_status(:forbidden)
+    end
+
+    it "DELETE responde 403 a user no-admin" do
+      device = create(:device)
+      delete "/api/v1/devices/#{device.id}", headers: non_admin_headers
+      expect(response).to have_http_status(:forbidden)
     end
   end
 end

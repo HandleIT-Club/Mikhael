@@ -5,6 +5,11 @@ class Device < ApplicationRecord
   SECURITY_LEVELS = %w[normal high].freeze
   ONLINE_THRESHOLD = 2.minutes
 
+  # Actions persistidas como JSON array (antes era CSV — frágil para nombres
+  # con comas y serialización inconsistente). Default a [] para que sea
+  # siempre un Array y nunca nil.
+  serialize :actions, coder: JSON, type: Array
+
   validates :device_id,      presence: true, uniqueness: true
   validates :name,           presence: true
   validates :system_prompt,  presence: true
@@ -12,9 +17,13 @@ class Device < ApplicationRecord
   validates :token,          presence: true, uniqueness: true
 
   before_validation :generate_token, on: :create
+  before_validation :normalize_actions
 
+  # Compat: el caller (forms, AssistantContext, etc.) sigue llamando
+  # actions_list y esperando un Array. Ahora actions ya ES un Array, así que
+  # solo limpiamos defensivamente.
   def actions_list
-    actions.to_s.split(",").map(&:strip).reject(&:empty?)
+    Array(actions).map(&:to_s).map(&:strip).reject(&:empty?)
   end
 
   def high_security?
@@ -37,5 +46,13 @@ class Device < ApplicationRecord
 
   def generate_token
     self.token ||= SecureRandom.hex(32)
+  end
+
+  # Acepta tanto un Array como un string CSV (cuando viene del form HTML que
+  # no sabe mandar arrays sin parámetros especiales). Esto centraliza el cast
+  # y evita que el form layer se preocupe del formato persistido.
+  def normalize_actions
+    return if actions.is_a?(Array)
+    self.actions = actions.to_s.split(",").map(&:strip).reject(&:empty?)
   end
 end

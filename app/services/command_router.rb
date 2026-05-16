@@ -101,9 +101,7 @@ class CommandRouter
   def set_timezone(name)
     return Result.message("Iniciá sesión para configurar tu zona.") unless @user
 
-    # UserTimezone.set lee Current.user. Acá lo seteamos temporalmente.
-    Current.user = @user
-    if UserTimezone.set(name)
+    if UserTimezone.set(name, user: @user)
       Result.message("✅ Zona horaria configurada: *#{name}*. Probá ahora: \"qué hora es\".")
     else
       Result.message(
@@ -115,8 +113,7 @@ class CommandRouter
   end
 
   def show_current_zone
-    Current.user = @user
-    tz = UserTimezone.current
+    tz = UserTimezone.current(user: @user)
     source =
       if @user && Setting.get_for(@user, UserTimezone::SETTING_KEY).present?
         "guardada en tu cuenta"

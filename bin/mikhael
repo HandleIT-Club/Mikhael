@@ -415,11 +415,13 @@ class Agent
     puts C.dim("  MQTT push:    ") + (mqtt.empty? ? C.red("✗ desactivado") : C.green("✓ activo  #{C.dim(mqtt)}"))
 
     tg_token = ENV["TELEGRAM_BOT_TOKEN"].to_s.strip
-    tg_chat  = ENV["TELEGRAM_CHAT_ID"].to_s.strip
-    if tg_token.empty? || tg_chat.empty?
-      puts C.dim("  Telegram bot: ") + C.red("✗ desactivado")
+    if tg_token.empty?
+      puts C.dim("  Telegram bot: ") + C.red("✗ desactivado") + C.dim(" (sin TELEGRAM_BOT_TOKEN)")
     else
-      puts C.dim("  Telegram bot: ") + C.green("✓ activo  ") + C.dim("chat #{tg_chat}")
+      # Multi-user: el chat_id vive por user en la DB, no en ENV. No lo
+      # podemos chequear desde el CLI sin tocar Rails — solo confirmamos
+      # que el token esté seteado.
+      puts C.dim("  Telegram bot: ") + C.green("✓ token configurado") + C.dim(" (vinculá users en Configuración)")
     end
 
     missing = providers.count { |_, env| ENV[env].to_s.strip.empty? }

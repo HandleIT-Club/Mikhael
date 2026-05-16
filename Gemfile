@@ -52,6 +52,17 @@ gem "mqtt"
 # Architecture — dry-monads para flujo de errores en operations
 gem "dry-monads"
 
+# HTTP client uniforme con retries automáticos para upstreams flaky
+# (Telegram, providers de AI, Ollama). Net::HTTP suelto no tiene retry
+# decente ni timeout uniforme.
+gem "faraday"
+gem "faraday-retry"
+
+# Traducciones default de Rails (errores de validation, helpers de form,
+# fechas, etc.) en español. Sin esto, raise_on_missing_translations explota
+# en formularios con errors.
+gem "rails-i18n"
+
 gem "dotenv-rails", groups: %i[development test]
 
 group :development, :test do
@@ -80,4 +91,8 @@ end
 group :development do
   # Use console on exceptions pages [https://github.com/rails/web-console]
   gem "web-console"
+
+  # Detecta N+1 queries en dev y muestra alert en el browser. Vale el ruido
+  # — en una app con conversations/messages anidados es fácil meter una.
+  gem "bullet"
 end

@@ -15,7 +15,8 @@ namespace :users do
     puts "   API token: #{user.api_token}"
     puts "   Telegram chat_id: #{user.telegram_chat_id || '(sin linkear)'}"
     puts ""
-    puts "   Guardá el API token — lo necesitás para autenticar el CLI y la API."
+    puts "   ⚠ Guardá el API token AHORA — es la única vez que se muestra."
+    puts "   (En DB solo persiste el HMAC; perderlo significa regenerarlo.)"
   rescue ActiveRecord::RecordInvalid => e
     abort("❌ No se pudo crear el user: #{e.record.errors.full_messages.join(', ')}")
   end
@@ -25,9 +26,11 @@ namespace :users do
     email = ENV["EMAIL"] or abort("EMAIL es requerido")
     user  = User.find_by(email: email.downcase.strip) or abort("Usuario no encontrado: #{email}")
 
-    user.regenerate_api_token!
+    plain = user.regenerate_api_token!
     puts "✅ Nuevo API token para #{user.email}:"
-    puts "   #{user.api_token}"
+    puts "   #{plain}"
+    puts ""
+    puts "   ⚠ El anterior dejó de funcionar."
   end
 
   desc "Listar todos los usuarios"

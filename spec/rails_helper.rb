@@ -18,6 +18,7 @@ RSpec.configure do |config|
   config.filter_rails_from_backtrace!
 
   config.include FactoryBot::Syntax::Methods
+  config.include ActiveSupport::Testing::TimeHelpers
 
   # Limpiamos el store de rate limiting entre tests para que los contadores
   # de un test no afecten al siguiente.

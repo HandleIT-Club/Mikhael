@@ -75,7 +75,12 @@ class CreateMessage
     [ system_prompt ] + Array(primer) + chat_history
   end
 
-  def system_prompt_for(conversation)
-    ModelConfig.prompt_for(conversation.model_id)
+  # Cuando el caller no pasa system_prompt explícito (API directa), caemos al
+  # contexto unificado de la CLI surface. Mantiene reglas anti-alucinación y
+  # tools disponibles — antes acá había un ModelConfig per-modelo que solo
+  # exponía el preamble, sin las reglas, así que la API era más insegura que
+  # web/Telegram. Ya no.
+  def system_prompt_for(_conversation)
+    AssistantContext.for(:cli).build
   end
 end

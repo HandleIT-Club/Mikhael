@@ -16,9 +16,9 @@
 class UserTimezone
   SETTING_KEY = "user_timezone".freeze
 
-  def self.current
-    if Current.user
-      tz = Setting.get_for(Current.user, SETTING_KEY)
+  def self.current(user: Current.user)
+    if user
+      tz = Setting.get_for(user, SETTING_KEY)
       return tz if tz.present?
     end
 
@@ -27,11 +27,17 @@ class UserTimezone
     ENV.fetch("MIKHAEL_TZ", "UTC")
   end
 
-  def self.set(tz)
+  # Persiste la zona para el user dado. Si user es nil, no hay dónde guardar.
+  # Acepta nombres IANA ("America/Argentina/Buenos_Aires") o aliases de
+  # ActiveSupport ("Buenos Aires", "Madrid", etc.).
+  #
+  # El user explícito (en lugar de leer Current.user) facilita testear y
+  # evita mutar state global desde callers que ya tienen el user a mano.
+  def self.set(tz, user: Current.user)
     return false unless ActiveSupport::TimeZone[tz]
-    return false unless Current.user # sin user no podemos persistir
+    return false unless user
 
-    Setting.set_for(Current.user, SETTING_KEY, tz)
+    Setting.set_for(user, SETTING_KEY, tz)
     Time.zone = tz
     true
   end

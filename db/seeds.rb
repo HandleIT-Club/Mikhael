@@ -1,5 +1,5 @@
-# Solo siembra dispositivos de ejemplo. Los ModelConfig se crean
-# automáticamente al primer acceso (ver ModelConfig.find_or_create_default).
+# Siembra dispositivos de ejemplo. El contexto del asistente (preamble) tiene
+# default en código y el admin lo edita desde /settings.
 DEVICE_SEEDS = [
   {
     device_id:      "esp32_riego",

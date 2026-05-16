@@ -33,7 +33,7 @@ RSpec.describe User do
     end
   end
 
-  describe "api_token" do
+  describe "api_token (HMAC digest en DB, plain solo en memoria)" do
     it "se autogenera con 256 bits (64 hex chars) en creación" do
       user = create(:user)
       expect(user.api_token).to be_present
@@ -41,17 +41,42 @@ RSpec.describe User do
       expect(user.api_token).to match(/\A[a-f0-9]{64}\z/)
     end
 
-    it "es único" do
+    it "el digest es único" do
       a = create(:user)
-      b = build(:user, api_token: a.api_token)
+      b = build(:user)
+      b.api_token_digest = a.api_token_digest
       expect(b).not_to be_valid
     end
 
-    it "regenerate_api_token! cambia el token" do
+    it "regenerate_api_token! cambia el token y devuelve el plain nuevo" do
       user = create(:user)
-      old  = user.api_token
-      user.regenerate_api_token!
-      expect(user.api_token).not_to eq(old)
+      old_digest = user.api_token_digest
+      new_plain  = user.regenerate_api_token!
+      expect(user.api_token_digest).not_to eq(old_digest)
+      expect(new_plain).to match(/\A[a-f0-9]{64}\z/)
+      expect(user.api_token).to eq(new_plain)
+    end
+
+    it "find_by_api_token resuelve el user por el plain (vía HMAC)" do
+      user = create(:user)
+      expect(described_class.find_by_api_token(user.api_token)).to eq(user)
+    end
+
+    it "find_by_api_token devuelve nil con plain incorrecto" do
+      create(:user)
+      expect(described_class.find_by_api_token("a" * 64)).to be_nil
+    end
+
+    it "find_by_api_token devuelve nil con plain vacío" do
+      expect(described_class.find_by_api_token("")).to be_nil
+      expect(described_class.find_by_api_token(nil)).to be_nil
+    end
+
+    it "el plain NO se persiste — el user recargado no lo conoce" do
+      user = create(:user)
+      reloaded = described_class.find(user.id)
+      expect(reloaded.api_token).to be_nil
+      expect(reloaded.api_token_digest).to be_present
     end
   end
 

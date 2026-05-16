@@ -1,0 +1,5 @@
+<%# Texto plano del chunk durante streaming. Auto-escapado por ERB para evitar
+   XSS si el AI escupe HTML/JS (prompt injection o respuesta malformada).
+   Al terminar el streaming, el placeholder se reemplaza con _message.html.erb
+   que renderiza markdown sanitizado. %>
+<%= text %>

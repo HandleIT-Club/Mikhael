@@ -79,12 +79,14 @@ Rails.application.configure do
   # Only use :id for inspections in production.
   config.active_record.attributes_for_inspect = [ :id ]
 
-  # Enable DNS rebinding protection and other `Host` header attacks.
-  # config.hosts = [
-  #   "example.com",     # Allow requests from example.com
-  #   /.*\.example\.com/ # Allow requests from subdomains like `www.example.com`
-  # ]
-  #
-  # Skip DNS rebinding protection for the default health check endpoint.
-  # config.host_authorization = { exclude: ->(request) { request.path == "/up" } }
+  # DNS rebinding & Host header protection. La lista viene de ENV
+  # MIKHAEL_HOSTS (comma-separated). Si está vacío, no aceptamos hosts —
+  # Rails va a rechazar todo, lo cual es seguro por default y obliga al
+  # operador a configurarlo antes del primer deploy.
+  hosts_from_env = ENV.fetch("MIKHAEL_HOSTS", "").split(",").map(&:strip).reject(&:empty?)
+  config.hosts = hosts_from_env if hosts_from_env.any?
+
+  # Skip host check para el healthcheck — Kamal y otros checkers lo pegan
+  # por IP, sin Host header válido.
+  config.host_authorization = { exclude: ->(request) { request.path == "/up" } }
 end

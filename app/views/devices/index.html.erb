@@ -12,8 +12,10 @@
     <div class="p-4 space-y-2">
       <%= link_to "← Volver al chat", conversations_path,
             class: "block w-full py-2 px-4 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm transition-colors text-center" %>
-      <%= link_to "⚙ Contextos", model_configs_path,
-            class: "block w-full py-2 px-4 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm transition-colors text-center" %>
+      <% if current_user&.admin? %>
+        <%= link_to "⚙ Configuración", settings_path,
+              class: "block w-full py-2 px-4 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm transition-colors text-center" %>
+      <% end %>
     </div>
 
     <div class="p-4 border-t border-zinc-800">

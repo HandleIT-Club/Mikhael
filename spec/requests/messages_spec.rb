@@ -9,6 +9,7 @@ RSpec.describe "Web MessagesController", type: :request do
 
   before do
     allow(OllamaModels).to receive(:installed).and_return([])
+    stub_ai_provider!
     allow(Ai::Dispatcher).to receive(:for).and_return(mock_client)
     allow(mock_client).to receive(:chat).and_return(Dry::Monads::Success(ai_response))
     allow(mock_client).to receive(:stream).and_return(Dry::Monads::Success(ai_response))
@@ -82,12 +83,11 @@ RSpec.describe "Web MessagesController", type: :request do
       before do
         device
         allow(MqttPublisher).to receive(:publish)
-        # AI del chat devuelve el tool call; AI de DispatchAction devuelve el JSON de acción.
-        allow(mock_client).to receive(:chat).and_return(
-          Dry::Monads::Success(ai_response),         # primera llamada — el chat
-          Dry::Monads::Success(dispatch_response)    # segunda — DispatchAction
-        )
+        # En web el chat principal va por #stream (con on_chunk) y devuelve el
+        # tool call. DispatchAction usa #chat (no streaming) y devuelve el JSON
+        # estructurado de la acción.
         allow(mock_client).to receive(:stream).and_return(Dry::Monads::Success(ai_response))
+        allow(mock_client).to receive(:chat).and_return(Dry::Monads::Success(dispatch_response))
       end
 
       it "ejecuta DispatchAction y publica al MQTT (no muestra JSON crudo)" do

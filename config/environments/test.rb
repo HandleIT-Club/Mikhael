@@ -20,7 +20,9 @@ Rails.application.configure do
 
   # Show full error reports.
   config.consider_all_requests_local = true
-  config.cache_store = :null_store
+  # Memory store en lugar de null para que tests de cooldown / cache puedan
+  # verificar comportamiento real. Cada spec hace Rails.cache.clear en before.
+  config.cache_store = :memory_store
 
   # Render exception templates for rescuable exceptions and raise for other exceptions.
   config.action_dispatch.show_exceptions = :rescuable
@@ -42,8 +44,9 @@ Rails.application.configure do
   # Print deprecation notices to the stderr.
   config.active_support.deprecation = :stderr
 
-  # Raises error for missing translations.
-  # config.i18n.raise_on_missing_translations = true
+  # Raises error for missing translations en tests — atrapa keys nuevas que
+  # se olviden de agregar a config/locales/es.yml antes de mergear.
+  config.i18n.raise_on_missing_translations = true
 
   # Annotate rendered view with file names.
   # config.action_view.annotate_rendered_view_with_filenames = true

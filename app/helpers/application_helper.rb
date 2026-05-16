@@ -24,31 +24,51 @@ module ApplicationHelper
     PROVIDER_NAMES[provider] || provider.to_s.capitalize
   end
 
+  # Opciones agrupadas para el select de modelo. La lista viene del
+  # registry — un solo punto de verdad.
   def conversation_model_options
+    groups = {}
+    Ai::ModelRegistry::CLOUD_PROVIDERS.each do |provider, cfg|
+      cfg[:tiers].each do |tier, models|
+        label = "#{provider_name(provider)} – #{tier.to_s.capitalize}"
+        groups[label] = models.map { |m| [ m, m ] }
+      end
+    end
     ollama = OllamaModels.installed.map { |m| [ m, m ] }
-    groups = {
-      "Groq – Avanzado"     => ModelSelector::GROQ_TIERS[:advanced].map { |m| [ m, m ] },
-      "Groq – Intermedio"   => ModelSelector::GROQ_TIERS[:intermediate].map { |m| [ m, m ] },
-      "Groq – Básico"       => ModelSelector::GROQ_TIERS[:basic].map { |m| [ m, m ] },
-      "Cerebras"            => ModelSelector::CEREBRAS_TIERS.values.flatten.map { |m| [ m, m ] },
-      "SambaNova"           => ModelSelector::SAMBANOVA_TIERS.values.flatten.map { |m| [ m, m ] }
-    }
     groups["Ollama (local)"] = ollama if ollama.any?
     groups
   end
 
+  # Allowlist de tags y atributos para el output del AI. Si el modelo escupe
+  # <script>, <iframe>, on*=…, javascript:, etc., el sanitizer los strippea.
+  # Esto cierra XSS por prompt injection o respuestas malformadas del LLM.
+  MARKDOWN_ALLOWED_TAGS = %w[
+    p br hr
+    strong em del code pre blockquote
+    h1 h2 h3 h4 h5 h6
+    ul ol li
+    a
+    table thead tbody tr th td
+  ].freeze
+
+  MARKDOWN_ALLOWED_ATTRIBUTES = %w[href title class].freeze
+
   def render_markdown(text)
     renderer = Redcarpet::Render::HTML.new(
-      filter_html: false,
-      hard_wrap: true,
-      with_toc_data: false
+      filter_html:   true,   # primer filtro: Redcarpet escapa HTML del input
+      hard_wrap:     true,
+      with_toc_data: false,
+      safe_links_only: true  # rechaza javascript:, data:, vbscript: URIs
     )
     markdown = Redcarpet::Markdown.new(renderer,
       fenced_code_blocks: true,
-      autolink: true,
-      strikethrough: true,
-      no_intra_emphasis: true
+      autolink:           true,
+      strikethrough:      true,
+      no_intra_emphasis:  true,
+      tables:             true
     )
-    markdown.render(text).html_safe
+    # Doble red: aunque filter_html ya escapó, sanitize con allowlist explícita
+    # garantiza que ningún tag/atributo fuera de la lista llegue al DOM.
+    sanitize(markdown.render(text), tags: MARKDOWN_ALLOWED_TAGS, attributes: MARKDOWN_ALLOWED_ATTRIBUTES)
   end
 end

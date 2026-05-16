@@ -5,27 +5,11 @@ class Conversation < ApplicationRecord
   belongs_to :user
   has_many :messages, dependent: :destroy
 
-  CLOUD_MODELS = {
-    "llama-3.3-70b-versatile"                    => "groq",
-    "meta-llama/llama-4-scout-17b-16e-instruct"  => "groq",
-    "openai/gpt-oss-120b"                        => "groq",
-    "qwen/qwen3-32b"                             => "groq",
-    "openai/gpt-oss-20b"                         => "groq",
-    "llama-3.1-8b-instant"                       => "groq",
-    "allam-2-7b"                                 => "groq",
-    "cerebras/llama-3.3-70b"                     => "cerebras",
-    "cerebras/llama3.1-8b"                       => "cerebras",
-    "sambanova/Meta-Llama-3.3-70B-Instruct"      => "sambanova",
-    "sambanova/Meta-Llama-3.1-405B-Instruct"     => "sambanova",
-    "sambanova/Meta-Llama-3.1-8B-Instruct"       => "sambanova"
-  }.freeze
+  # Delegamos al registry para evitar duplicar el mapping y para que la
+  # memoización viva en un solo lugar.
+  def self.all_models = Ai::ModelRegistry.all_models
 
-  def self.all_models
-    ollama = OllamaModels.installed.index_with("ollama")
-    CLOUD_MODELS.merge(ollama)
-  end
-
-  validates :model_id, presence: true, inclusion: { in: -> { Conversation.all_models.keys } }
+  validates :model_id, presence: true, inclusion: { in: -> { Ai::ModelRegistry.all_models.keys } }
   validates :provider, presence: true
 
   before_validation :infer_provider
@@ -43,7 +27,7 @@ class Conversation < ApplicationRecord
   # Siempre derivamos provider desde model_id para evitar estados inconsistentes
   # (ej: provider="ollama" con model_id de Groq pasa validación pero rompe en dispatch).
   def infer_provider
-    self.provider = self.class.all_models[model_id] if model_id
+    self.provider = Ai::ModelRegistry.provider_for(model_id) if model_id
   end
 
   def set_default_title

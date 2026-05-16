@@ -2,21 +2,47 @@
 # Copyright (C) 2026 Nicolás S. Navarro
 # Licensed under AGPL-3.0 — https://www.gnu.org/licenses/agpl-3.0.html
 
-# System prompt unificado para el AI, compartido entre web y Telegram.
+# System prompt unificado para el AI, compartido entre web, Telegram y CLI.
 #
 # Filosofía: el AI sugiere, Rails ejecuta. El prompt define los tools que
 # el AI puede llamar (`call_device`, `create_reminder`), pero quien LOS
 # EJECUTA es ToolCallExecutor en Ruby. El AI nunca toca DispatchAction ni
 # Reminder.create directamente.
 #
-# Surfaces: :web, :telegram. Difieren en tono (concisión móvil para
-# Telegram), no en capacidades — ambas tienen los mismos tools.
+# Surfaces: :web, :telegram, :cli. Difieren en tono (concisión móvil para
+# Telegram), no en capacidades — todas tienen los mismos tools y reglas.
+#
+# Composición del prompt:
+#
+#   [preamble editable por admin] (Setting "assistant_preamble")
+#   ─────────────────────────────
+#   REGLAS críticas anti-alucinación (código, NO editables)
+#   Tools disponibles + JSON schema
+#   Lista de dispositivos online/offline
+#   Hora actual del turno (dynamic)
+#
+# El preamble vive en código solo como default — el admin lo personaliza
+# desde /settings sin tocar nada de las reglas.
 class AssistantContext
-  SURFACES = %i[web telegram].freeze
+  SURFACES        = %i[web telegram cli].freeze
+  PREAMBLE_KEY    = "assistant_preamble".freeze
+  DEFAULT_PREAMBLE = <<~PREAMBLE.strip.freeze
+    Sos Mikhael — un asistente personal. Respondé en español, de forma clara, breve y natural.
+    Cuando muestres código, usá bloques markdown con el lenguaje correcto.
+    El usuario es un desarrollador trabajando en macOS con Ruby on Rails.
+  PREAMBLE
 
   def self.for(surface)
     raise ArgumentError, "surface inválida: #{surface}" unless SURFACES.include?(surface)
     new(surface)
+  end
+
+  def self.preamble
+    Setting.get(PREAMBLE_KEY, DEFAULT_PREAMBLE).presence || DEFAULT_PREAMBLE
+  end
+
+  def self.set_preamble(value)
+    Setting.set(PREAMBLE_KEY, value.to_s.strip)
   end
 
   def initialize(surface)
@@ -24,7 +50,8 @@ class AssistantContext
   end
 
   # Fingerprint del system prompt + primer (sin hora actual — esa va aparte).
-  # Si cambia el static_prompt, las conversaciones cacheadas se resetean.
+  # Si cambia el preamble o se agregan devices, se invalida y las
+  # conversaciones cacheadas (Telegram) se resetean.
   def fingerprint
     Digest::SHA256.hexdigest(static_prompt + primer.to_json)
   end
@@ -64,9 +91,9 @@ class AssistantContext
 
   def static_prompt
     <<~PROMPT
-      Sos Mikhael — un asistente IA personal con acceso real a los dispositivos IoT del usuario y a un sistema de recordatorios. NO sos un modelo de lenguaje genérico.
+      #{self.class.preamble}
 
-      REGLAS:
+      REGLAS (no negociables):
       - NUNCA inventes el estado de un dispositivo, ni digas que "actualizaste software", "detectaste un sensor con problemas", "el riego se está ejecutando", etc. Vos NO sabés el estado real — solo Rails lo sabe. Si te preguntan por el estado, respondé con lo que aparece en "Dispositivos del usuario" abajo (online/offline + acciones disponibles), nada más.
       - NUNCA digas "soy un modelo de lenguaje" o "no tengo acceso a tus dispositivos". Es FALSO. La lista real está abajo.
       - NUNCA digas "no tengo acceso a información en tiempo real" ni "no sé qué hora es". Es FALSO: la fecha y hora actuales te llegan en cada turno bajo "FECHA Y HORA ACTUAL". Usalas para responder preguntas de hora/fecha en la zona horaria del usuario.
@@ -149,6 +176,7 @@ class AssistantContext
     case @surface
     when :telegram then "- Sos conciso (chat móvil): respuestas cortas y naturales, máximo 2-3 líneas para charla, 1 sola línea de confirmación tras un tool."
     when :web      then "- Sos directo y conciso. Evitá listas con bullets, secciones largas o tipo \"informe\". Respondé como en un chat real."
+    when :cli      then "- Sos preciso y directo. Salida pensada para terminal: párrafos cortos, código en bloques."
     end
   end
 end

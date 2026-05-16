@@ -1,7 +1,9 @@
 require "rails_helper"
 
 RSpec.describe "Sessions", type: :request do
-  let(:user) { create(:user, password: "supersecret123456") }
+  # admin para que `/devices` no rebote en require_admin! cuando testeamos
+  # return_to abajo.
+  let(:user) { create(:user, :admin, password: "supersecret123456") }
 
   describe "GET /session/new" do
     it "muestra el form de login" do

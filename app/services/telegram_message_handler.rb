@@ -75,11 +75,12 @@ class TelegramMessageHandler
     executor = ToolCallExecutor.new(user_message: user_message, user: @user, surface: :telegram)
     result   = executor.call(ai_response.content)
 
-    if result
-      send_message(result.reply) if result.reply.present?
-    else
-      send_message(ai_response.content)
-    end
+    # result == nil   → no era tool call, mostramos la respuesta cruda del AI
+    # result.silenced? → dedup silencioso, NO mandamos nada (el primer turno ya respondió)
+    # caso normal     → mandamos el reply formateado del tool
+    return send_message(ai_response.content) if result.nil?
+    return if result.silenced?
+    send_message(result.reply) if result.reply.present?
   end
 
   def reset_conversation
