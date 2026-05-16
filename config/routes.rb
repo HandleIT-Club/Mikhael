@@ -3,6 +3,11 @@ Rails.application.routes.draw do
 
   resource :session, only: %i[new create destroy]
 
+  # Bootstrap del primer admin desde el browser. Solo accesible si la DB
+  # está vacía — después de eso, redirige al login.
+  get  "/setup", to: "setup#new",    as: :setup
+  post "/setup", to: "setup#create"
+
   resources :conversations, only: %i[index show create update destroy] do
     resources :messages, only: %i[create]
   end

@@ -28,6 +28,16 @@
       <% end %>
     </div>
 
+    <%# Banner one-shot del API token recién creado (setup wizard, o regenerate
+        en /settings). Lo mostramos prominente porque es la ÚNICA vez. %>
+    <% if flash[:reveal_token] %>
+      <div class="fixed bottom-4 left-4 right-4 md:left-auto md:right-4 md:max-w-md z-50 bg-amber-500/10 border border-amber-500/40 rounded-xl p-4 shadow-2xl">
+        <p class="text-xs text-amber-400 font-medium mb-2">⚠ Tu API token (solo se muestra ahora — guardalo):</p>
+        <code class="block text-xs text-amber-300 font-mono break-all bg-zinc-950 px-3 py-2 rounded select-all"><%= flash[:reveal_token] %></code>
+        <p class="text-xs text-zinc-500 mt-2">Pegalo en tu <code class="text-amber-400">.env</code> como <code class="text-amber-400">MIKHAEL_API_TOKEN=...</code> para el CLI.</p>
+      </div>
+    <% end %>
+
     <%= yield %>
   </body>
 </html>
