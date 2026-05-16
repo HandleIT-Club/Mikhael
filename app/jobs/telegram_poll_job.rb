@@ -21,14 +21,25 @@ class TelegramPollJob < ApplicationJob
   LOCK_TTL       = 30.seconds  # mata locks de jobs colgados (worker muerto)
 
   def perform
-    return unless TelegramClient.configured?
+    unless TelegramClient.configured?
+      Rails.logger.warn("TelegramPollJob: TELEGRAM_BOT_TOKEN ausente, skip.")
+      return
+    end
 
     with_lock do
       offset   = Setting.get(OFFSET_KEY)&.to_i
       response = TelegramClient.get_updates(offset: offset)
-      return unless response&.dig("ok")
 
-      (response["result"] || []).each do |update|
+      unless response&.dig("ok")
+        Rails.logger.warn("TelegramPollJob: getUpdates devolvió #{response.inspect.truncate(200)}")
+        return
+      end
+
+      updates = response["result"] || []
+      return if updates.empty? # silencio cuando no hay nada — no spam logs
+
+      Rails.logger.info("TelegramPollJob: #{updates.size} update(s) recibido(s), offset=#{offset}")
+      updates.each do |update|
         process(update)
         Setting.set(OFFSET_KEY, update["update_id"] + 1)
       end
@@ -63,12 +74,14 @@ class TelegramPollJob < ApplicationJob
     user = User.find_by(telegram_chat_id: chat_id)
 
     unless user
-      Rails.logger.warn("TelegramPollJob: chat_id=#{chat_id} no está linkeado a ningún User. Ignorando: #{text.first(40).inspect}")
+      Rails.logger.warn("TelegramPollJob: chat_id=#{chat_id} sin vincular. Ignorando: #{text.first(40).inspect}. " \
+                       "Vinculalo desde /settings o vía bin/rails users:create con TELEGRAM_CHAT_ID=#{chat_id}.")
       return
     end
 
+    Rails.logger.info("TelegramPollJob: procesando msg de user=#{user.id} chat=#{chat_id}: #{text.first(60).inspect}")
     TelegramMessageHandler.new(user: user, chat_id: chat_id).call(text)
   rescue => e
-    Rails.logger.error("TelegramPollJob#process: #{e.class} — #{e.message}")
+    Rails.logger.error("TelegramPollJob#process: #{e.class} — #{e.message}\n#{e.backtrace.first(5).join("\n")}")
   end
 end
