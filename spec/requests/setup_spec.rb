@@ -99,4 +99,55 @@ RSpec.describe "Setup wizard (bootstrap del primer admin)", type: :request do
       end
     end
   end
+
+  # ─── API JSON para el CLI (bin/mikhael primer arranque) ─────────────────
+  describe "POST /setup (JSON)" do
+    let(:json_headers) { { "Content-Type" => "application/json", "Accept" => "application/json" } }
+    let(:valid_body)   { { user: { email: "cli@example.test", password: "supersecret123456" } } }
+
+    context "cuando NO hay users" do
+      it "crea el admin y devuelve { email, admin, api_token } con 201" do
+        post setup_path, params: valid_body.to_json, headers: json_headers
+        expect(response).to have_http_status(:created)
+        body = JSON.parse(response.body)
+        expect(body["email"]).to eq("cli@example.test")
+        expect(body["admin"]).to be(true)
+        expect(body["api_token"]).to match(/\A[a-f0-9]{64}\z/)
+      end
+
+      it "NO loguea al user (es para el CLI, no para session-based)" do
+        post setup_path, params: valid_body.to_json, headers: json_headers
+        expect(session[:user_id]).to be_nil
+      end
+
+      it "devuelve 422 con errors si validation falla" do
+        post setup_path, params: { user: { email: "x@example.test", password: "corta" } }.to_json, headers: json_headers
+        expect(response).to have_http_status(:unprocessable_content)
+        body = JSON.parse(response.body)
+        expect(body["errors"]).to be_an(Array)
+        expect(body["errors"].join).to match(/password/i)
+      end
+
+      it "acepta telegram_chat_id opcional" do
+        post setup_path,
+             params: valid_body.deep_merge(user: { telegram_chat_id: "9999" }).to_json,
+             headers: json_headers
+        expect(User.last.telegram_chat_id).to eq("9999")
+      end
+    end
+
+    context "cuando ya hay users (setup cerrado)" do
+      before { create(:user) }
+
+      it "devuelve 403 con { error: setup_already_completed }" do
+        post setup_path, params: valid_body.to_json, headers: json_headers
+        expect(response).to have_http_status(:forbidden)
+        expect(JSON.parse(response.body)).to eq("error" => "setup_already_completed")
+      end
+
+      it "no crea otro user" do
+        expect { post setup_path, params: valid_body.to_json, headers: json_headers }.not_to change(User, :count)
+      end
+    end
+  end
 end

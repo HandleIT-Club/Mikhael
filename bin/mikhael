@@ -17,6 +17,7 @@ require "json"
 require "uri"
 require "readline"
 require "socket"
+require "io/console"  # noecho para password input
 require "faraday"
 require "faraday/retry"
 
@@ -33,19 +34,12 @@ if File.exist?(env_file)
 end
 
 RAILS_URL = ENV.fetch("MIKHAEL_URL", "http://localhost:3000")
-API_TOKEN = ENV["MIKHAEL_API_TOKEN"].to_s.strip
+ENV_FILE  = File.join(RAILS_PROJECT, ".env")
 
-if API_TOKEN.empty?
-  warn "\033[0;31m✗ MIKHAEL_API_TOKEN no está seteado.\033[0m"
-  warn ""
-  warn "  Creá tu user con:"
-  warn "    bin/rails users:create EMAIL=tu@email.com PASSWORD=algo_de_12_chars"
-  warn ""
-  warn "  Y exportá el api_token que imprime:"
-  warn "    export MIKHAEL_API_TOKEN=<el_token_que_imprime>"
-  warn ""
-  exit 1
-end
+# Si MIKHAEL_API_TOKEN está vacío y la DB está vacía (primer arranque), el
+# Onboarding wizard lo va a crear y guardar acá automáticamente. Si la DB
+# tiene users pero el token está vacío/inválido, fallamos limpio más abajo
+# con instrucciones para regenerar.
 
 module C
   RST  = "\033[0m"
@@ -82,6 +76,18 @@ class RailsClient
   class AuthError       < StandardError; end
   class ConnectionError < StandardError; end
 
+  @api_token = ENV["MIKHAEL_API_TOKEN"].to_s.strip
+
+  class << self
+    attr_accessor :api_token
+
+    # Tras setear un token nuevo (post-onboarding), invalidamos la connection
+    # memoizada para que la próxima request use el header actualizado.
+    def reset_connection!
+      @connection = nil
+    end
+  end
+
   def self.connection
     @connection ||= Faraday.new(url: BASE) do |conn|
       conn.request :retry,
@@ -93,7 +99,7 @@ class RailsClient
                    exceptions: [ Faraday::TimeoutError, Faraday::ConnectionFailed, Errno::ECONNREFUSED ]
       conn.headers["Content-Type"]  = "application/json"
       conn.headers["Accept"]        = "application/json"
-      conn.headers["Authorization"] = "Bearer #{API_TOKEN}"
+      conn.headers["Authorization"] = "Bearer #{api_token}" if api_token.to_s.strip != ""
       conn.options.timeout      = 120
       conn.options.open_timeout = 5
       conn.adapter Faraday.default_adapter
@@ -116,6 +122,158 @@ class RailsClient
   rescue Faraday::ConnectionFailed
     raise ConnectionError, "No se puede conectar al servidor Mikhael en #{BASE}. ¿Está corriendo 'bin/dev'?"
   end
+end
+
+# ─── Onboarding wizard (primer arranque) ──────────────────────────────────────
+#
+# Si la DB está vacía, crea el primer admin desde el CLI. Equivalente al
+# wizard del browser en /setup, pero interactivo desde la terminal.
+#
+# Detecta pristine vía GET /setup → 200 (form HTML). Si hay users, /setup
+# redirige al login (302) y el wizard NO se dispara.
+#
+# Tras crear el admin, guarda el token plain en MIKHAEL_API_TOKEN del .env
+# del proyecto (o lo agrega si no estaba). El user no necesita hacer nada
+# manual.
+
+class OnboardingWizard
+  MIN_PASSWORD = 12
+
+  def self.needed?
+    res = Net::HTTP.get_response(URI("#{RAILS_URL}/setup"))
+    res.code.to_i == 200
+  rescue StandardError
+    false
+  end
+
+  def self.run!(env_file:)
+    puts
+    puts C.gold("╔══════════════════════════════════════╗")
+    puts C.gold("║") + C.ivory("       Primer arranque — setup        ") + C.gold("║")
+    puts C.gold("╚══════════════════════════════════════╝")
+    puts C.dim("  La DB está vacía. Vamos a crear tu cuenta de administrador.")
+    puts C.dim("  Esto se hace una sola vez.")
+    puts
+
+    email    = prompt_email
+    password = prompt_password
+    telegram = prompt_optional("Telegram chat_id (opcional, Enter para saltar): ")
+
+    body = {
+      user: {
+        email:            email,
+        password:         password,
+        telegram_chat_id: telegram.presence
+      }
+    }
+
+    response = post_json(URI("#{RAILS_URL}/setup"), body)
+
+    if response.code.to_i == 201
+      data = JSON.parse(response.body)
+      save_token_to_env(data["api_token"], env_file)
+      RailsClient.api_token = data["api_token"]
+      RailsClient.reset_connection!
+
+      puts
+      puts C.green("✓ Admin creado: #{data['email']}")
+      puts C.green("✓ Token guardado en #{env_file}")
+      puts
+    else
+      errors =
+        begin
+          parsed = JSON.parse(response.body)
+          parsed["errors"] || [ parsed.inspect ]
+        rescue JSON::ParserError
+          [ "Server respondió status #{response.code} con body no-JSON (primeros 200 chars):", response.body.to_s[0..200] ]
+        end
+
+      puts
+      puts C.red("✗ No se pudo crear el admin:")
+      errors.each { |e| puts C.red("    · #{e}") }
+      puts
+      puts C.yellow("  Reintentá corriendo 'mikhael' otra vez.")
+      exit 1
+    end
+  end
+
+  # ── prompts ─────────────────────────────────────────────────────────────
+
+  def self.prompt_email
+    loop do
+      print C.cyan("  Email: ")
+      input = $stdin.gets&.chomp&.strip.to_s
+      return input if input =~ URI::MailTo::EMAIL_REGEXP
+      puts C.red("  ✗ Email inválido, probá de nuevo.")
+    end
+  end
+
+  def self.prompt_password
+    loop do
+      input = read_password("  Contraseña (mínimo #{MIN_PASSWORD} chars, oculta): ")
+      if input.length >= MIN_PASSWORD
+        confirm = read_password("  Confirmar contraseña: ")
+        return input if input == confirm
+        puts C.red("  ✗ No coinciden, probá de nuevo.")
+      else
+        puts C.red("  ✗ Muy corta (#{input.length} de #{MIN_PASSWORD}), probá de nuevo.")
+      end
+    end
+  end
+
+  # Lee password con echo oculto si stdin es TTY. Si no (pipe/redirect en
+  # tests), lee normal — noecho tira Errno::ENOTTY en ese caso.
+  def self.read_password(label)
+    print C.cyan(label)
+    input = if $stdin.tty?
+              $stdin.noecho(&:gets).to_s.chomp
+    else
+              $stdin.gets.to_s.chomp
+    end
+    puts
+    input
+  end
+
+  def self.prompt_optional(label)
+    print C.cyan("  #{label}")
+    $stdin.gets&.chomp&.strip.to_s
+  end
+
+  # ── HTTP + env file ────────────────────────────────────────────────────
+
+  def self.post_json(uri, body)
+    Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https") do |http|
+      req = Net::HTTP::Post.new(uri)
+      req["Content-Type"] = "application/json"
+      req["Accept"]       = "application/json"
+      req.body            = body.to_json
+      http.request(req)
+    end
+  end
+
+  # Reescribe (o agrega) la línea MIKHAEL_API_TOKEN= en el .env del proyecto.
+  # No usa una gem porque queremos mantener el CLI sin dotenv-rails.
+  def self.save_token_to_env(token, env_file)
+    lines    = File.exist?(env_file) ? File.readlines(env_file, chomp: true) : []
+    new_line = "MIKHAEL_API_TOKEN=#{token}"
+
+    if lines.any? { |l| l.start_with?("MIKHAEL_API_TOKEN=") }
+      lines.map! { |l| l.start_with?("MIKHAEL_API_TOKEN=") ? new_line : l }
+    else
+      lines << new_line
+    end
+
+    File.write(env_file, "#{lines.join("\n")}\n")
+  end
+end
+
+# Refinement local: String#presence (sin Rails)
+class String
+  def presence = empty? ? nil : self
+end
+
+class NilClass
+  def presence = nil
 end
 
 # ─── Detector de comandos ──────────────────────────────────────────────────────
@@ -391,6 +549,8 @@ class Agent
   def run
     print_header
     check_server
+    maybe_run_onboarding
+    ensure_token_present!
     load_models
     @conversation = select_or_create_conversation
     if @conversation.nil?
@@ -413,6 +573,31 @@ class Agent
     puts C.green("✓ Servidor conectado — #{RAILS_URL}")
     print_integrations_status
     puts
+  end
+
+  # ── Onboarding (primer arranque) ──────────────────────────────────
+
+  def maybe_run_onboarding
+    return unless OnboardingWizard.needed?
+    OnboardingWizard.run!(env_file: ENV_FILE)
+  end
+
+  # Si pasamos onboarding y todavía no hay token (porque el user canceló o
+  # el .env no se pudo escribir), salimos con instrucciones claras antes de
+  # disparar la primera request autenticada.
+  def ensure_token_present!
+    return if RailsClient.api_token.to_s.strip != ""
+
+    puts
+    puts C.red("✗ No hay MIKHAEL_API_TOKEN configurado.")
+    puts
+    puts C.yellow("  Si es la primera vez, corré 'bin/rails db:prepare' y volvé a")
+    puts C.yellow("  arrancar Mikhael — el wizard te va a guiar.")
+    puts C.yellow("  Si ya tenés users, regenerá un token con:")
+    puts C.cyan("    bin/rails users:regenerate_token EMAIL=tu@email.com")
+    puts C.yellow("  Y guardalo como MIKHAEL_API_TOKEN= en #{ENV_FILE}")
+    stop_services
+    exit 1
   end
 
   def print_integrations_status
