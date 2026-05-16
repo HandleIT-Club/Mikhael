@@ -77,6 +77,11 @@ end
 class RailsClient
   BASE = RAILS_URL
 
+  # Errores propios (clases dedicadas) — el main al final del archivo los
+  # rescata y sale limpio con mensaje útil, sin stack trace fea.
+  class AuthError       < StandardError; end
+  class ConnectionError < StandardError; end
+
   def self.connection
     @connection ||= Faraday.new(url: BASE) do |conn|
       conn.request :retry,
@@ -105,13 +110,11 @@ class RailsClient
       req.body = body.to_json if body
     end
 
-    if response.status == 401
-      raise "Token inválido (401). Verificá tu MIKHAEL_API_TOKEN. Regenerá con: bin/rails users:regenerate_token EMAIL=..."
-    end
+    raise AuthError, "Token inválido (401)." if response.status == 401
 
     JSON.parse(response.body) rescue nil
   rescue Faraday::ConnectionFailed
-    raise "No se puede conectar al servidor Mikhael en #{BASE}. ¿Está corriendo 'bin/dev'?"
+    raise ConnectionError, "No se puede conectar al servidor Mikhael en #{BASE}. ¿Está corriendo 'bin/dev'?"
   end
 end
 
@@ -536,6 +539,11 @@ class Agent
     puts C.yellow("  Probable causa: server crasheando al cargar. Revisá log/development.log")
     puts C.yellow("  o regenerá tu token con: bin/rails users:regenerate_token EMAIL=...")
     @models = []
+    # Errores específicos (AuthError, ConnectionError) NO se rescatan acá —
+    # propagan hasta main que muestra mensaje claro y sale con exit 1.
+    # Otros errores sí se manejan acá para no romper el menú de conversaciones.
+  rescue RailsClient::AuthError, RailsClient::ConnectionError
+    raise
   rescue => e
     puts C.yellow("⚠ No se pudieron cargar modelos: #{e.message}")
     @models = []
@@ -825,4 +833,23 @@ rescue Interrupt
   puts C.gold("Interrumpido. ¡Hasta luego!")
   agent.send(:stop_services)
   exit 0
+rescue RailsClient::AuthError
+  puts
+  puts C.red("✗ MIKHAEL_API_TOKEN inválido o expirado.")
+  puts
+  puts C.yellow("  Tu token (en ~/mikhael/.env) no matchea ningún user de la DB.")
+  puts C.yellow("  Esto suele pasar cuando:")
+  puts C.dim("    · Borraste y recreaste la DB (db:reset) — el HMAC cambió.")
+  puts C.dim("    · Migraste de la versión pre-HMAC con un token nuevo.")
+  puts
+  puts C.yellow("  Regenerá el token con:")
+  puts C.cyan("    bin/rails users:regenerate_token EMAIL=tu@email.com")
+  puts C.yellow("  Y actualizá MIKHAEL_API_TOKEN= en ~/mikhael/.env")
+  agent.send(:stop_services)
+  exit 1
+rescue RailsClient::ConnectionError => e
+  puts
+  puts C.red("✗ #{e.message}")
+  agent.send(:stop_services)
+  exit 1
 end
