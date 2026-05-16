@@ -570,6 +570,7 @@ class Agent
   def check_server
     ensure_ollama_running
     ensure_rails_running
+    ensure_jobs_running
     puts C.green("✓ Servidor conectado — #{RAILS_URL}")
     print_integrations_status
     puts
@@ -652,7 +653,41 @@ class Agent
     wait_for_rails_ready
   end
 
+  # SolidQueue procesa el polling de Telegram, los recordatorios, y todos
+  # los recurring tasks. Si no corre, Telegram no responde (bug clásico —
+  # el user veía "no responde" porque no había job que procese updates).
+  #
+  # Si ya hay un proceso solid_queue corriendo (típicamente porque el user
+  # tiene `bin/dev` aparte), no lanzamos otro. Si no, lo arrancamos en
+  # background y lo apagamos al salir.
+  def ensure_jobs_running
+    if solid_queue_running?
+      puts C.dim("  Jobs (SolidQueue): ya en ejecución (compartido con bin/dev).")
+      return
+    end
+
+    puts C.cyan("⚡ Iniciando SolidQueue (jobs)...")
+    @jobs_pid = Process.spawn(
+      "bin/jobs",
+      chdir: RAILS_PROJECT, out: "/dev/null", err: "/dev/null", pgroup: 0
+    )
+    # Damos un par de segundos para que registre el scheduler de recurring.
+    # No hay un /up de SolidQueue — confiamos en el sleep + el log.
+    sleep 2
+    puts C.green("  ✓ Jobs lanzados (PID #{@jobs_pid}).")
+  end
+
+  def solid_queue_running?
+    # pgrep -f matchea por command line. Buscamos el proceso supervisor.
+    system("pgrep -f 'solid_queue' > /dev/null 2>&1")
+  end
+
   def stop_services
+    if @jobs_pid
+      puts C.cyan("  Cerrando jobs...")
+      Process.kill("-TERM", -@jobs_pid) rescue nil
+      Process.wait(@jobs_pid) rescue nil
+    end
     if @rails_pid
       puts C.cyan("  Cerrando Rails...")
       Process.kill("-TERM", -@rails_pid) rescue nil

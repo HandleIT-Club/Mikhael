@@ -17,10 +17,27 @@ class TelegramClient
 
   # Multi-user: chat_id es obligatorio. Antes era global desde ENV; ahora
   # cada user tiene su propio telegram_chat_id y el caller lo pasa.
+  #
+  # Si Telegram rechaza el Markdown (caracteres como `_*[]()~` sin balancear
+  # o escapar, típicos en respuestas del AI), reintentamos como texto plano.
+  # Antes esto se traducía en "el bot no respondió" — el error quedaba solo
+  # en el log y el user se preguntaba qué pasó.
   def self.send_message(text, chat_id:)
     return unless configured?
     return unless chat_id.present?
-    post("sendMessage", chat_id: chat_id, text: text, parse_mode: "Markdown")
+
+    result = post("sendMessage", chat_id: chat_id, text: text, parse_mode: "Markdown")
+    return result if result.nil? || result["ok"]
+    return result unless markdown_parse_error?(result)
+
+    Rails.logger.warn("Telegram: Markdown inválido, reintentando como plain text. desc=#{result['description']}")
+    post("sendMessage", chat_id: chat_id, text: text)
+  end
+
+  # Detecta el error 400 típico de Telegram cuando el parse de Markdown falla.
+  # Ej: "Bad Request: can't parse entities: Can't find end of the entity..."
+  def self.markdown_parse_error?(response)
+    response["error_code"] == 400 && response["description"].to_s.match?(/can't parse entities|parse_mode/i)
   end
 
   def self.get_updates(offset: nil)
