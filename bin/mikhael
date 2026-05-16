@@ -4,13 +4,21 @@
 # Licensed under AGPL-3.0 — https://www.gnu.org/licenses/agpl-3.0.html
 # Uso: mikhael [-a]
 #   -a  Modo agente (detecta y ejecuta comandos de shell)
+
+RAILS_PROJECT = ENV.fetch("MIKHAEL_PROJECT", File.expand_path("~/mikhael"))
+
+# Usamos el Gemfile del proyecto Mikhael para tener Faraday (con retries
+# automáticos), sin importar desde qué directorio se invoque el CLI.
+ENV["BUNDLE_GEMFILE"] = File.join(RAILS_PROJECT, "Gemfile")
+require "bundler/setup"
+
 require "net/http"
 require "json"
 require "uri"
 require "readline"
 require "socket"
-
-RAILS_PROJECT = ENV.fetch("MIKHAEL_PROJECT", File.expand_path("~/mikhael"))
+require "faraday"
+require "faraday/retry"
 
 # Cargar variables del .env del proyecto Mikhael (sin pisar las que ya estén en el shell).
 env_file = File.join(RAILS_PROJECT, ".env")
@@ -61,44 +69,48 @@ module C
 end
 
 # ─── Cliente Rails API ─────────────────────────────────────────────────────────
+#
+# Faraday con retries automáticos (2 reintentos con backoff). Una red local
+# que parpadea, un Rails que tarda en arrancar, o un upstream lento ya no
+# rebota al usuario inmediatamente.
 
 class RailsClient
   BASE = RAILS_URL
 
-  def self.get(path)
-    request(Net::HTTP::Get, path)
-  end
-
-  def self.post(path, body = nil)
-    request(Net::HTTP::Post, path, body)
-  end
-
-  def self.patch(path, body = nil)
-    request(Net::HTTP::Patch, path, body)
-  end
-
-  def self.delete(path)
-    request(Net::HTTP::Delete, path)
-  end
-
-  def self.request(klass, path, body = nil)
-    uri = URI("#{BASE}#{path}")
-    Net::HTTP.start(uri.host, uri.port) do |http|
-      req = klass.new(uri.path,
-                      "Content-Type"  => "application/json",
-                      "Accept"        => "application/json",
-                      "Authorization" => "Bearer #{API_TOKEN}")
-      req.body = body.to_json if body
-      http.read_timeout = 120
-      response = http.request(req)
-
-      if response.code.to_i == 401
-        raise "Token inválido (401). Verificá tu MIKHAEL_API_TOKEN. Regenerá con: bin/rails users:regenerate_token EMAIL=..."
-      end
-
-      JSON.parse(response.body) rescue nil
+  def self.connection
+    @connection ||= Faraday.new(url: BASE) do |conn|
+      conn.request :retry,
+                   max: 2,
+                   interval: 0.5,
+                   backoff_factor: 2,
+                   methods: %i[get post patch delete],
+                   retry_statuses: [ 429, 502, 503, 504 ],
+                   exceptions: [ Faraday::TimeoutError, Faraday::ConnectionFailed, Errno::ECONNREFUSED ]
+      conn.headers["Content-Type"]  = "application/json"
+      conn.headers["Accept"]        = "application/json"
+      conn.headers["Authorization"] = "Bearer #{API_TOKEN}"
+      conn.options.timeout      = 120
+      conn.options.open_timeout = 5
+      conn.adapter Faraday.default_adapter
     end
-  rescue Errno::ECONNREFUSED
+  end
+
+  def self.get(path)         = request(:get,    path)
+  def self.post(path, body = nil)  = request(:post,   path, body)
+  def self.patch(path, body = nil) = request(:patch,  path, body)
+  def self.delete(path)      = request(:delete, path)
+
+  def self.request(verb, path, body = nil)
+    response = connection.public_send(verb, path) do |req|
+      req.body = body.to_json if body
+    end
+
+    if response.status == 401
+      raise "Token inválido (401). Verificá tu MIKHAEL_API_TOKEN. Regenerá con: bin/rails users:regenerate_token EMAIL=..."
+    end
+
+    JSON.parse(response.body) rescue nil
+  rescue Faraday::ConnectionFailed
     raise "No se puede conectar al servidor Mikhael en #{BASE}. ¿Está corriendo 'bin/dev'?"
   end
 end

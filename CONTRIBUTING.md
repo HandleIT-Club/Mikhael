@@ -1,78 +1,141 @@
 # Contribuir a Mikhael
 
-¡Gracias por tu interés en contribuir! Mikhael es un asistente personal de IA de código abierto, y cualquier mejora —por pequeña que sea— es bienvenida.
+Mikhael es un asistente personal de IA — pensado para correr en local, en
+casa o en un homelab. Cualquier mejora es bienvenida.
 
-## Cómo empezar
-
-1. **Hacé un fork** del repositorio en GitHub.
-2. **Cloná tu fork** localmente:
-   ```bash
-   git clone https://github.com/tu-usuario/mikhael.git
-   cd mikhael
-   ```
-3. **Configurá el entorno**:
-   ```bash
-   bundle install
-   cp .env.example .env   # completá con tus keys de desarrollo
-   bin/rails db:setup
-   ```
-4. **Creá una rama** desde `main` con un nombre descriptivo:
-   ```bash
-   git checkout -b feature/mi-mejora
-   # o
-   git checkout -b fix/descripcion-del-bug
-   ```
-5. **Hacé tus cambios**, commiteá y pusheá tu rama a tu fork.
-6. **Abrí un Pull Request** contra `main` de este repositorio.
-
-## Requisitos para que un PR sea aceptado
-
-Antes de abrir el PR, asegurate de que todo esto pase:
+## Setup local
 
 ```bash
-bundle exec rspec          # todos los tests en verde
-bundle exec rubocop        # sin ofensas de estilo
-bundle exec brakeman -q    # sin advertencias de seguridad
+git clone https://github.com/tu-usuario/mikhael.git
+cd mikhael
+bundle install
+cp .env.example .env                    # mínimo: GROQ_API_KEY (gratuito)
+bin/rails db:setup                      # crea schema + corre migrations
+bin/rails users:create EMAIL=tu@email.com PASSWORD=elegi_uno_de_12_chars
+#                                       ⤴ imprime el api_token: guardalo en .env
+#                                         como MIKHAEL_API_TOKEN
+bin/dev                                 # web + tailwind + solid_queue jobs
+```
+
+Abrí <http://localhost:3000>, logueate, y listo. El CLI en `bin/mikhael` usa
+el mismo `MIKHAEL_API_TOKEN`.
+
+Para vincular Telegram: setea `TELEGRAM_BOT_TOKEN` en `.env`, andá a
+`/settings` (admin) y vinculá tu `telegram_chat_id`. `bin/dev` ya arranca el
+polling vía `config/recurring.yml`.
+
+## Qué tiene que pasar antes de abrir un PR
+
+```bash
+bundle exec rspec                       # suite verde
+bundle exec rubocop                     # sin ofensas
+bundle exec brakeman -q                 # sin warnings
 ```
 
 ### Tests
 
-- **Todo cambio de comportamiento requiere tests.** Si agregás una feature, escribí los specs. Si corregís un bug, escribí un test que hubiera detectado ese bug.
-- Los tests van en `spec/` siguiendo la estructura existente (`spec/services/`, `spec/operations/`, `spec/models/`, etc.).
-- No se aceptan PRs que bajen la cobertura de casos críticos sin justificación.
+Todo cambio de comportamiento requiere tests. La estructura sigue el árbol
+del código:
 
-### Estilo
+| Cambio en…               | Spec en…                       |
+|--------------------------|--------------------------------|
+| `app/models/`            | `spec/models/`                 |
+| `app/operations/`        | `spec/operations/`             |
+| `app/services/`          | `spec/services/`               |
+| `app/controllers/`       | `spec/requests/`               |
+| Flujo end-to-end (HTML)  | `spec/system/` (Cuprite headless) |
 
-- Seguimos la configuración de RuboCop del proyecto (`.rubocop.yml`).
-- Sin `binding.pry`, `puts` de debug ni código comentado en el diff final.
-- Commits en inglés o español, lo que prefieras, pero descriptivos.
+Helpers útiles:
+
+- `spec/support/ai_provider_stubs.rb` → `stub_ai_provider!` mockea
+  `ModelSelector` para que tests sin `GROQ_API_KEY` corran determinístico.
+- `spec/support/authentication_helpers.rb` → `sign_in_as(user)` (request)
+  y `sign_in_through_form(user)` (system).
+
+### Estilo y commits
+
+- RuboCop omakase del proyecto (`.rubocop.yml`).
+- Sin `binding.pry`, `puts` de debug ni código comentado en el diff.
+- Commits descriptivos. Inglés o español, lo que prefieras.
+- **No mergeés con `--no-verify`**: si un hook falla, arreglá el problema.
 
 ### Seguridad
 
-- No incluyas API keys, tokens ni secretos en el código ni en los tests.
-- Si encontrás una vulnerabilidad de seguridad, **no abras un issue público** — escribime directamente.
+- No incluyas API keys ni tokens en el código ni en los tests.
+- Si encontrás una vulnerabilidad, **no abras un issue público** —
+  escribime directamente.
 
-## Qué tipo de contribuciones se valoran
+## Arquitectura — mapa mental
 
-- Nuevos providers de IA (si tienen API compatible con OpenAI)
-- Mejoras al sistema de fallback entre modelos
-- Nuevas integraciones (dispositivos, protocolos)
+```
+Web/Telegram/CLI
+       │
+       ▼
+ProcessUserMessage (operation)        ← orquesta un turno completo
+   │   │   │
+   │   │   └── ChatBroadcaster        ← Turbo Streams (web)
+   │   │       o NullChatBroadcaster  ← para API / specs
+   │   │
+   │   ├── CommandRouter              ← /dispositivos, /zona, etc.
+   │   ├── MessageIntentRouter        ← "qué hora es" → Rails responde
+   │   └── CreateMessage              ← llama al AI con streaming
+   │              │
+   │              ▼
+   │         Ai::Dispatcher  ──▶  Ai::*Client (Groq/Cerebras/SambaNova/Ollama)
+   │              │
+   │              └── Ai::FallbackChain ← orden cuando uno falla
+   │                       │
+   │                       ├── Ai::ModelRegistry  ← catálogo (cached)
+   │                       └── Ai::Cooldown       ← rate-limited cache
+   │
+   └── ToolCallExecutor               ← AI sugiere, Rails ejecuta
+         │
+         ├── DispatchAction           ← decide acción para un Device
+         │      │
+         │      ▼
+         │   MqttPublisher            ← push al ESP32 vía MQTT
+         │
+         └── Reminder.create + ExecuteReminderJob (programado)
+```
+
+**Principio central:** *El AI sugiere, Rails ejecuta.* Los routers
+determinísticos (`CommandRouter`, `MessageIntentRouter`) interceptan todo
+lo que Rails puede responder sin el AI. El AI solo decide cuando no hay
+respuesta exacta — y aún así, lo que ejecuta son tools en Ruby
+(`ToolCallExecutor`), no el modelo.
+
+### Capas que tocan más seguido
+
+- `app/operations/process_user_message.rb` — un turno completo de chat.
+- `app/services/assistant_context.rb` — el system prompt (incluye el
+  preamble editable desde `/settings`).
+- `app/services/tool_call_executor.rb` — qué hacer con la respuesta del AI.
+- `app/services/ai/` — providers AI y fallback chain.
+- `app/controllers/settings_controller.rb` + `users_controller.rb` —
+  config admin-only.
+
+## Qué entra y qué no en el scope
+
+✅ **Sí:**
+- Nuevos providers de IA (compatibles con OpenAI o vía RubyLLM)
+- Mejoras al fallback / cooldown
+- Nuevos tipos de devices o tools
+- Más superficies (CLI, Telegram, web ya cubiertas)
 - Corrección de bugs con test incluido
-- Mejoras de documentación y ejemplos
-- Traducciones de la UI
+- Mejoras de docs y ejemplos
 
-## Qué no entra en el scope del proyecto
-
-- Funcionalidades que requieran exponer Mikhael a internet (no hay servidor público por diseño)
-- Dependencias pesadas sin justificación clara
-- Cambios que rompan la compatibilidad con el flujo de instalación simple (`bin/mikhael`)
+❌ **No:**
+- Funcionalidades que requieran exponer Mikhael a internet pública
+  (Mikhael es server privado por diseño — `config.hosts` defaultea cerrado).
+- Multi-tenancy / SaaS — es asistente personal/familiar, no plataforma.
+- Dependencias pesadas sin justificación clara.
 
 ## Proceso de revisión
 
 - Los PRs se revisan tan pronto como sea posible.
-- Si un PR lleva más de 7 días sin actividad después del feedback, puede cerrarse.
-- Un PR aprobado se mergea con **squash** para mantener el historial limpio.
+- Si un PR queda 7+ días sin actividad tras feedback, puede cerrarse.
+- Merge con **squash** para mantener el historial limpio.
 
 ---
 
-Ante cualquier duda, abrí un [issue](https://github.com/nicolassnavarro/mikhael/issues) y con gusto lo charlamos.
+Cualquier duda, abrí un [issue](https://github.com/nicolassnavarro/mikhael/issues).
