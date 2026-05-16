@@ -9,9 +9,26 @@ default: &default
   pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
   timeout: 5000
 
+# Multi-DB también en development: misma estructura que producción para que
+# bin/dev (que arranca solid_queue) tenga las tablas que necesita
+# (solid_queue_recurring_tasks, etc.) cargadas desde db/queue_schema.rb.
+# Antes esto solo existía en prod y bin/jobs crasheaba en dev.
 development:
-  <<: *default
-  database: storage/development.sqlite3
+  primary:
+    <<: *default
+    database: storage/development.sqlite3
+  cache:
+    <<: *default
+    database: storage/development_cache.sqlite3
+    migrations_paths: db/cache_migrate
+  queue:
+    <<: *default
+    database: storage/development_queue.sqlite3
+    migrations_paths: db/queue_migrate
+  cable:
+    <<: *default
+    database: storage/development_cable.sqlite3
+    migrations_paths: db/cable_migrate
 
 # Warning: The database defined as "test" will be erased and
 # re-generated from your development database when you run "rake".

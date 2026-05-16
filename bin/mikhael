@@ -451,13 +451,17 @@ class Agent
 
   def ensure_rails_running
     uri = URI(RAILS_URL)
-    return if port_open?(uri.host, uri.port)
+    if port_open?(uri.host, uri.port)
+      wait_for_rails_ready  # ya está corriendo, igual confirmamos que responde /up
+      return
+    end
     puts C.cyan("⚡ Iniciando Rails...")
     @rails_pid = Process.spawn(
       "bin/rails server -p #{uri.port}",
       chdir: RAILS_PROJECT, out: "/dev/null", err: "/dev/null", pgroup: 0
     )
     wait_for("Rails", uri.host, uri.port)
+    wait_for_rails_ready
   end
 
   def stop_services
@@ -492,10 +496,46 @@ class Agent
     exit 1
   end
 
+  # Healthcheck real al endpoint /up de Rails. TCP open != app cargada —
+  # Puma bindea el puerto antes de terminar el eager_load, y cualquier
+  # request prematura puede recibir 500 sin que sepamos.
+  def wait_for_rails_ready(timeout: 30)
+    uri = URI("#{RAILS_URL}/up")
+    print C.cyan("  Verificando app")
+    timeout.times do
+      begin
+        res = Net::HTTP.get_response(uri)
+        return puts(C.green(" lista")) if res.code.to_i == 200
+      rescue StandardError
+        # connect/read errors: app todavía no responde, seguimos esperando
+      end
+      print "."
+      sleep 1
+    end
+    puts
+    puts C.red("✗ Rails no respondió 200 en /up tras #{timeout}s. Revisá log/development.log.")
+    exit 1
+  end
+
   # ── Modelos ───────────────────────────────────────────────────────
 
   def load_models
-    @models = RailsClient.get("/api/v1/models") || []
+    result = RailsClient.get("/api/v1/models")
+
+    if result.is_a?(Array)
+      @models = result
+      return
+    end
+
+    # Si vino algo que no es array (nil por JSON malformado, hash de error
+    # del server, etc.), no procedemos en silencio — el usuario tiene que
+    # saber qué pasó. Antes esto resultaba en "No hay modelos disponibles"
+    # ambiguo y sin pista de la causa raíz.
+    puts C.red("✗ /api/v1/models devolvió una respuesta inesperada (#{result.class}).")
+    puts C.dim("  Body: #{result.inspect[0..300]}")
+    puts C.yellow("  Probable causa: server crasheando al cargar. Revisá log/development.log")
+    puts C.yellow("  o regenerá tu token con: bin/rails users:regenerate_token EMAIL=...")
+    @models = []
   rescue => e
     puts C.yellow("⚠ No se pudieron cargar modelos: #{e.message}")
     @models = []

@@ -10,7 +10,7 @@ git clone https://github.com/tu-usuario/mikhael.git
 cd mikhael
 bundle install
 cp .env.example .env                    # mínimo: GROQ_API_KEY (gratuito)
-bin/rails db:setup                      # crea schema + corre migrations
+bin/rails db:prepare                    # crea las 4 DBs (primary + queue + cache + cable)
 bin/rails users:create EMAIL=tu@email.com PASSWORD=elegi_uno_de_12_chars
 #                                       ⤴ imprime el api_token: guardalo en .env
 #                                         como MIKHAEL_API_TOKEN

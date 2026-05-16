@@ -86,11 +86,16 @@ git clone https://github.com/tu-usuario/mikhael.git
 cd mikhael
 bundle install
 cp .env.example .env                              # mínimo: GROQ_API_KEY
-bin/rails db:setup
+bin/rails db:prepare                              # crea las 4 DBs (primary + queue + cache + cable)
 bin/rails users:create EMAIL=tu@mail.com PASSWORD=algo_de_12_chars_min
 #                                       ⤴ imprime tu API token — guardalo
 bin/dev                                           # web + tailwind + jobs
 ```
+
+> **¿Venís de una versión anterior con una sola DB?** Corré `bin/rails db:prepare`
+> para crear las DBs nuevas (`development_queue.sqlite3`, `_cache`, `_cable`)
+> sin tocar tu primary. Las tablas de SolidQueue/Cache/Cable viven ahora en
+> archivos separados (mismo pattern que producción).
 
 Abrí <http://localhost:3000>. Logueate. Listo.
 
