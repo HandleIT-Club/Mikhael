@@ -10,7 +10,16 @@
   </head>
 
   <body class="h-full bg-zinc-950 text-zinc-100 antialiased" data-controller="timezone">
-    <div id="flash" class="fixed top-4 right-4 z-50 space-y-2 max-w-sm">
+    <% if user_signed_in? %>
+      <div class="fixed top-3 right-3 z-50 flex items-center gap-2 bg-zinc-900/90 backdrop-blur border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-400 shadow-lg">
+        <span class="truncate max-w-[160px]"><%= current_user.email %></span>
+        <%= button_to "Salir", session_path, method: :delete,
+              class: "text-zinc-400 hover:text-amber-400 cursor-pointer",
+              form: { class: "inline" } %>
+      </div>
+    <% end %>
+
+    <div id="flash" class="fixed top-16 right-4 z-50 space-y-2 max-w-sm">
       <% if notice %>
         <%= render "shared/flash", type: :notice, message: notice %>
       <% end %>
@@ -18,15 +27,6 @@
         <%= render "shared/flash", type: :alert, message: alert %>
       <% end %>
     </div>
-
-    <% if user_signed_in? %>
-      <div class="fixed bottom-3 right-3 z-40 flex items-center gap-2 bg-zinc-900/90 backdrop-blur border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-400 shadow-lg">
-        <span class="truncate max-w-[160px]"><%= current_user.email %></span>
-        <%= button_to "Salir", session_path, method: :delete,
-              class: "text-zinc-400 hover:text-amber-400 cursor-pointer",
-              form: { class: "inline" } %>
-      </div>
-    <% end %>
 
     <%= yield %>
   </body>

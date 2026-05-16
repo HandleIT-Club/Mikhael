@@ -24,8 +24,20 @@ if File.exist?(env_file)
   end
 end
 
-RAILS_URL    = ENV.fetch("MIKHAEL_URL", "http://localhost:3000")
-APP_PASSWORD = ENV["MIKHAEL_PASSWORD"].to_s.strip
+RAILS_URL = ENV.fetch("MIKHAEL_URL", "http://localhost:3000")
+API_TOKEN = ENV["MIKHAEL_API_TOKEN"].to_s.strip
+
+if API_TOKEN.empty?
+  warn "\033[0;31m✗ MIKHAEL_API_TOKEN no está seteado.\033[0m"
+  warn ""
+  warn "  Creá tu user con:"
+  warn "    bin/rails users:create EMAIL=tu@email.com PASSWORD=algo_de_12_chars"
+  warn ""
+  warn "  Y exportá el api_token que imprime:"
+  warn "    export MIKHAEL_API_TOKEN=<el_token_que_imprime>"
+  warn ""
+  exit 1
+end
 
 module C
   RST  = "\033[0m"
@@ -72,11 +84,18 @@ class RailsClient
   def self.request(klass, path, body = nil)
     uri = URI("#{BASE}#{path}")
     Net::HTTP.start(uri.host, uri.port) do |http|
-      req = klass.new(uri.path, "Content-Type" => "application/json", "Accept" => "application/json")
-      req.basic_auth("mikhael", APP_PASSWORD) unless APP_PASSWORD.empty?
+      req = klass.new(uri.path,
+                      "Content-Type"  => "application/json",
+                      "Accept"        => "application/json",
+                      "Authorization" => "Bearer #{API_TOKEN}")
       req.body = body.to_json if body
       http.read_timeout = 120
       response = http.request(req)
+
+      if response.code.to_i == 401
+        raise "Token inválido (401). Verificá tu MIKHAEL_API_TOKEN. Regenerá con: bin/rails users:regenerate_token EMAIL=..."
+      end
+
       JSON.parse(response.body) rescue nil
     end
   rescue Errno::ECONNREFUSED
@@ -602,8 +621,10 @@ class Agent
     $stdout.flush
 
     Net::HTTP.start(uri.host, uri.port, read_timeout: 120) do |http|
-      req = Net::HTTP::Post.new(uri, "Content-Type" => "application/json", "Accept" => "text/event-stream")
-      req.basic_auth("mikhael", APP_PASSWORD) unless APP_PASSWORD.empty?
+      req = Net::HTTP::Post.new(uri,
+                                "Content-Type"  => "application/json",
+                                "Accept"        => "text/event-stream",
+                                "Authorization" => "Bearer #{API_TOKEN}")
       req.body = { message: { content: content } }.to_json
 
       http.request(req) do |response|

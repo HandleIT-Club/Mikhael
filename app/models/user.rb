@@ -18,7 +18,7 @@ class User < ApplicationRecord
 
   validates :email,    presence: true, uniqueness: { case_sensitive: false },
                        format: { with: URI::MailTo::EMAIL_REGEXP }
-  validates :password, length: { minimum: 12 }, if: -> { password.present? }
+  validates :password, length: { minimum: 8 }, if: -> { password.present? }
   validates :telegram_chat_id, uniqueness: true, allow_blank: true
   validates :api_token,        presence: true, uniqueness: true
 
