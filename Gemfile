@@ -71,6 +71,10 @@ group :development, :test do
   gem "faker"
   gem "webmock"
   gem "vcr"
+  # Capybara + Cuprite para system specs end-to-end con Chrome headless
+  # (sin necesidad de Selenium ni chromedriver — Cuprite habla CDP directo)
+  gem "capybara"
+  gem "cuprite"
 end
 
 group :development do

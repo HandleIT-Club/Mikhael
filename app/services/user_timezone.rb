@@ -11,7 +11,7 @@
 #      (ej: server headless usando solo Telegram/CLI).
 #   3. "UTC" — último recurso.
 #
-# Se aplica al booteo (config/application.rb) y a TelegramContextBuilder
+# Se aplica al booteo (config/application.rb) y a AssistantContext
 # para que el chat AI vea la zona correcta sin importar la superficie.
 class UserTimezone
   SETTING_KEY = "user_timezone".freeze

@@ -21,7 +21,7 @@ fallback automático entre proveedores, o **completamente offline** con Ollama.
 ![Hotwire](https://img.shields.io/badge/Hotwire-Turbo-8b5cf6?style=flat-square)
 ![Telegram](https://img.shields.io/badge/Telegram-Bot-26A5E4?style=flat-square&logo=telegram&logoColor=white)
 ![MQTT](https://img.shields.io/badge/MQTT-IoT-660066?style=flat-square)
-![Tests](https://img.shields.io/badge/Tests-167%20passing-22c55e?style=flat-square)
+![Tests](https://img.shields.io/badge/Tests-243%20passing-22c55e?style=flat-square)
 ![License](https://img.shields.io/badge/Licencia-AGPL--3.0-blue?style=flat-square)
 
 </div>
@@ -1007,8 +1007,14 @@ app/
 ├── services/
 │   ├── model_selector.rb               # Tiers, fallback chain, cooldown por rate limit
 │   ├── ollama_models.rb                # Cache 60s de /api/tags
-│   ├── telegram_message_handler.rb     # Comandos, fast-path "qué hora es", fallback de recordatorios
-│   ├── telegram_context_builder.rb     # System prompt + primer + hora actual inyectada cada turno
+│   │
+│   │ ─── Capa unificada "AI sugiere, Rails ejecuta" (web + Telegram) ───
+│   ├── assistant_context.rb            # System prompt + primer + hora actual. Surface-aware (:web/:telegram)
+│   ├── command_router.rb               # Slash commands (/zona, /dispositivos, /recordatorios, /borrar_recordatorio)
+│   ├── message_intent_router.rb        # Interceptor determinístico: hora, lista de devices
+│   ├── tool_call_executor.rb           # Parsea respuesta AI → ejecuta call_device / create_reminder en Rails
+│   │
+│   ├── telegram_message_handler.rb     # Shim delgado para Telegram (delega a los services compartidos)
 │   ├── user_timezone.rb                # Resolución TZ: Setting > ENV > UTC
 │   └── ai/
 │       ├── dispatcher.rb               # Resuelve provider → client
@@ -1030,6 +1036,16 @@ app/
 
 ### Decisiones de diseño
 
+- **AI sugiere, Rails ejecuta**: el principio rector. Toda la "potencia" del asistente
+  (ejecutar dispositivos, programar recordatorios, decir la hora, listar devices) está
+  implementada en Ruby/Rails. El AI es un parser de lenguaje natural que sugiere qué
+  acción tomar (vía tools) o qué información buscar. Si el AI alucina, Rails tiene la
+  última palabra y desestima la fabricación.
+- **Una sola capa lógica para web y Telegram**: `AssistantContext`, `CommandRouter`,
+  `MessageIntentRouter` y `ToolCallExecutor` se comparten. `MessagesController` (web) y
+  `TelegramMessageHandler` son shims delgados que solo manejan I/O (cable broadcast vs
+  HTTP a Telegram). Agregar una nueva superficie (Discord, WhatsApp...) es escribir un
+  shim, no reimplementar lógica.
 - **Provider derivado, no input**: `Conversation#provider` se computa siempre desde
   `model_id`. Evita estados inconsistentes (`provider=ollama` con `model_id` de Groq).
 - **Ollama dinámico**: la lista de modelos locales se consulta con `/api/tags` en runtime
@@ -1064,11 +1080,21 @@ app/
 bundle exec rspec
 ```
 
-**167 ejemplos** cubriendo modelos, operations, controllers web, API JSON, auth básica
-opcional, dispatcher, OllamaModels, endpoint de actions con tokens, streaming, rate limiting,
-recordatorios programados (tool `create_reminder` + `ExecuteReminderJob` con Solid Queue),
-fallback determinístico cuando el AI no usa el tool, dedup de duplicados, y resolución
-multi-fuente de zona horaria (`UserTimezone` con Setting > ENV > UTC).
+**243 ejemplos** cubriendo:
+
+- **Unit specs** (services, models, jobs): `AssistantContext`, `CommandRouter`,
+  `MessageIntentRouter`, `ToolCallExecutor`, `UserTimezone`, `Setting`, `Reminder`,
+  `ExecuteReminderJob`, dispatcher AI, OllamaModels, ModelSelector.
+- **Request specs**: API JSON (actions, conversations, messages, devices, heartbeat,
+  models), rate limiting, web `MessagesController` (commands + intents + tool execution),
+  endpoint `PATCH /timezone`.
+- **System specs** (Capybara + Cuprite, Chrome headless): flujos reales en browser —
+  slash commands, intent router, ejecución de tool calls del AI, fallback de recordatorios.
+  No mockean al user — tipean en el form y verifican que la DB cambió.
+
+```bash
+bundle exec rspec spec/system  # solo browser tests
+```
 
 ```bash
 bundle exec brakeman    # análisis estático de seguridad — debería pasar con 0 warnings

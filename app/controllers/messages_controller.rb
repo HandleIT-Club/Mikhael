@@ -10,38 +10,37 @@ class MessagesController < ApplicationController
 
     original_model = @conversation.model_id
 
-    # 1. Guardar user message y enviarlo al browser de inmediato vía cable.
+    # 1. Guardar user message y broadcastearlo.
     user_msg = @conversation.messages.create!(role: "user", content: content)
     cable_append partial: "messages/message", locals: { message: user_msg }
 
-    # 2. Interceptor compartido con Telegram: preguntas con respuesta determinística
-    # (hora, etc.) se responden desde Rails, sin tocar el AI. Evita que el modelo
-    # alucine "no tengo acceso a info en tiempo real" cuando sí la tenemos.
-    if (intercepted = MessageIntentRouter.intercept(content))
-      assistant_msg = @conversation.messages.create!(role: "assistant", content: intercepted.assistant_persist)
-      cable_append partial: "messages/message", locals: { message: assistant_msg }
-      maybe_generate_title
-      return head :ok
+    # 2. Slash commands (/zona, /recordatorios, /dispositivos, etc.). Shared con Telegram.
+    return respond_with_text(CommandRouter.handle(content).reply) if CommandRouter.handle(content)
+
+    # 3. Intent router: preguntas determinísticas (hora, estado de devices). Shared con Telegram.
+    if (intent = MessageIntentRouter.intercept(content))
+      return respond_with_text(intent.reply, persist: intent.assistant_persist)
     end
 
-    # 3. Mostrar placeholder de streaming (con cursor parpadeante).
+    # 4. AI con contexto unificado (devices + tools + hora). Streaming.
     cable_append partial: "messages/streaming_placeholder"
 
-    # 4. Streaming: cada chunk actualiza el texto del placeholder en el browser.
-    buffer = +""
-    result = CreateMessage.new.call(
-      conversation: @conversation,
-      content:      content,
-      user_message: user_msg,
-      on_chunk:     ->(chunk) { buffer << chunk; cable_broadcast_chunk(buffer) }
+    buffer  = +""
+    context = AssistantContext.for(:web)
+    result  = CreateMessage.new.call(
+      conversation:  @conversation,
+      content:       content,
+      user_message:  user_msg,
+      system_prompt: context.build,
+      primer:        context.primer,
+      on_chunk:      ->(chunk) { buffer << chunk; cable_broadcast_chunk(buffer) }
     )
 
-    # 5. Reemplazar el placeholder con el mensaje final (renderizado con Markdown).
     @conversation.reload
     @model_switched = @conversation.model_id != original_model
 
     result.either(
-      ->(ai_response) { handle_success(ai_response) },
+      ->(ai_response) { handle_success(ai_response, user_message: content) },
       ->(_error)      { handle_streaming_failure }
     )
   end
@@ -94,24 +93,47 @@ class MessagesController < ApplicationController
 
   # ── Handlers de resultado ────────────────────────────────────────────────────
 
-  def handle_success(ai_response)
-    maybe_generate_title
+  def handle_success(ai_response, user_message:)
+    # Si la respuesta es un tool call (call_device o create_reminder), Rails lo
+    # ejecuta — el AI solo lo sugirió. El mensaje persistido se reescribe con el
+    # resultado real para que la conversación tenga el contenido correcto y no
+    # JSON crudo.
+    executor   = ToolCallExecutor.new(user_message: user_message, surface: :web)
+    tool_result = executor.call(ai_response.content)
+
     assistant_msg = @conversation.messages.where(role: "assistant").last
 
-    cable_replace_placeholder(
-      partial: "messages/message",
-      locals:  { message: assistant_msg }
-    )
-
-    if @model_switched
-      cable_broadcast_model_switch
+    if tool_result
+      if tool_result.reply.present?
+        assistant_msg.update!(content: tool_result.assistant_persist)
+      else
+        # Dedup silencioso (Reminder duplicado) — borramos el placeholder y el
+        # assistant message vacío que el AI generó.
+        assistant_msg&.destroy
+        cable_remove_placeholder
+        return head :ok
+      end
     end
 
+    maybe_generate_title
+    cable_replace_placeholder(partial: "messages/message", locals: { message: assistant_msg })
+
+    cable_broadcast_model_switch if @model_switched
+
     if @title_updated
-      Turbo::StreamsChannel.broadcast_update_to(cable_channel, target: "conversation-title",        html: @conversation.title)
+      Turbo::StreamsChannel.broadcast_update_to(cable_channel, target: "conversation-title",            html: @conversation.title)
       Turbo::StreamsChannel.broadcast_update_to(cable_channel, target: "conv-title-#{@conversation.id}", html: @conversation.title)
     end
 
+    head :ok
+  end
+
+  # Para slash commands e intent router: persiste un assistant message y lo
+  # muestra inmediatamente, sin pasar por el AI ni streaming.
+  def respond_with_text(reply_text, persist: nil)
+    assistant_msg = @conversation.messages.create!(role: "assistant", content: persist || reply_text)
+    cable_append partial: "messages/message", locals: { message: assistant_msg }
+    maybe_generate_title
     head :ok
   end
 
