@@ -20,7 +20,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_16_130000) do
     t.string "title"
     t.datetime "updated_at", null: false
     t.integer "user_id", null: false
-    t.index ["user_id"], name: "index_conversations_on_user_id"
+    t.index [ "user_id" ], name: "index_conversations_on_user_id"
   end
 
   create_table "devices", force: :cascade do |t|
@@ -33,8 +33,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_16_130000) do
     t.text "system_prompt", default: "", null: false
     t.string "token", null: false
     t.datetime "updated_at", null: false
-    t.index ["device_id"], name: "index_devices_on_device_id", unique: true
-    t.index ["token"], name: "index_devices_on_token", unique: true
+    t.index [ "device_id" ], name: "index_devices_on_device_id", unique: true
+    t.index [ "token" ], name: "index_devices_on_token", unique: true
   end
 
   create_table "messages", force: :cascade do |t|
@@ -45,8 +45,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_16_130000) do
     t.string "provider"
     t.string "role"
     t.datetime "updated_at", null: false
-    t.index ["conversation_id", "created_at"], name: "index_messages_on_conversation_id_and_created_at"
-    t.index ["conversation_id"], name: "index_messages_on_conversation_id"
+    t.index [ "conversation_id", "created_at" ], name: "index_messages_on_conversation_id_and_created_at"
+    t.index [ "conversation_id" ], name: "index_messages_on_conversation_id"
   end
 
   create_table "reminders", force: :cascade do |t|
@@ -58,10 +58,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_16_130000) do
     t.datetime "scheduled_for", null: false
     t.datetime "updated_at", null: false
     t.integer "user_id", null: false
-    t.index ["device_id"], name: "index_reminders_on_device_id"
-    t.index ["executed_at"], name: "index_reminders_on_executed_at"
-    t.index ["scheduled_for"], name: "index_reminders_on_scheduled_for"
-    t.index ["user_id"], name: "index_reminders_on_user_id"
+    t.index [ "device_id" ], name: "index_reminders_on_device_id"
+    t.index [ "executed_at" ], name: "index_reminders_on_executed_at"
+    t.index [ "scheduled_for" ], name: "index_reminders_on_scheduled_for"
+    t.index [ "user_id" ], name: "index_reminders_on_user_id"
   end
 
   create_table "settings", force: :cascade do |t|
@@ -70,8 +70,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_16_130000) do
     t.datetime "updated_at", null: false
     t.integer "user_id"
     t.text "value"
-    t.index ["user_id", "key"], name: "index_settings_on_user_id_and_key", unique: true
-    t.index ["user_id"], name: "index_settings_on_user_id"
+    t.index [ "user_id", "key" ], name: "index_settings_on_user_id_and_key", unique: true
+    t.index [ "user_id" ], name: "index_settings_on_user_id"
   end
 
   create_table "users", force: :cascade do |t|
@@ -82,9 +82,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_16_130000) do
     t.string "password_digest", null: false
     t.string "telegram_chat_id"
     t.datetime "updated_at", null: false
-    t.index ["api_token_digest"], name: "index_users_on_api_token_digest", unique: true
-    t.index ["email"], name: "index_users_on_email", unique: true
-    t.index ["telegram_chat_id"], name: "index_users_on_telegram_chat_id", unique: true
+    t.index [ "api_token_digest" ], name: "index_users_on_api_token_digest", unique: true
+    t.index [ "email" ], name: "index_users_on_email", unique: true
+    t.index [ "telegram_chat_id" ], name: "index_users_on_telegram_chat_id", unique: true
   end
 
   add_foreign_key "conversations", "users"

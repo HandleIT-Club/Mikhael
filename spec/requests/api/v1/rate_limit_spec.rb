@@ -108,7 +108,7 @@ RSpec.describe "Rate Limiting", type: :request do
     let(:limit) { ENV.fetch("RATE_LIMIT_LOGIN_PER_MIN", "5").to_i }
 
     it "después de N intentos fallidos rechaza con 429" do
-      ip_key = "rate-limit:sessions:login:#{::IPAddr.new('127.0.0.1')&.to_s}"
+      ip_key = "rate-limit:sessions:login:#{::IPAddr.new('127.0.0.1')}"
       # Más simple: directamente seedear con la key que usamos
       RATE_LIMIT_STORE.write("rate-limit:sessions:login:127.0.0.1", limit, expires_in: 1.minute)
 

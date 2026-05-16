@@ -171,7 +171,7 @@ class CommandRunner
 
   def self.capture(command, silent: false)
     lines = []
-    IO.popen(["bash", "-c", command], err: [:child, :out]) do |io|
+    IO.popen([ "bash", "-c", command ], err: [ :child, :out ]) do |io|
       io.each_line { |l| print l unless silent; lines << l }
     end
     lines.join
@@ -334,10 +334,10 @@ class DevicesMenu
     print C.cyan("  Seguridad actual: #{current_sec} — [1] Normal  [2] Alta  [enter] mantener: ")
     sec_choice = $stdin.gets&.chomp&.strip
     security_level = case sec_choice
-                     when "1" then "normal"
-                     when "2" then "high"
-                     else device["security_level"]
-                     end
+    when "1" then "normal"
+    when "2" then "high"
+    else device["security_level"]
+    end
 
     result = RailsClient.patch("/api/v1/devices/#{device['id']}", {
       device: { system_prompt: system_prompt, security_level: security_level, actions: actions }
@@ -504,7 +504,7 @@ class Agent
   def model_label(m)
     provider = PROVIDER_LABELS[m["provider"]] || m["provider"]
     tier     = m["tier"] ? " · #{TIER_LABELS[m['tier']] || m['tier']}" : ""
-    "%-45s %s" % [m["model_id"], C.dim("(#{provider}#{tier})")]
+    "%-45s %s" % [ m["model_id"], C.dim("(#{provider}#{tier})") ]
   end
 
   # ── Conversaciones ────────────────────────────────────────────────
