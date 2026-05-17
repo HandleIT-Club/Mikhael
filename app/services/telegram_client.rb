@@ -82,9 +82,38 @@ class TelegramClient
     nil
   end
 
+  # Llama a getFile(file_id) y devuelve el file_path de Telegram (string),
+  # o nil si la llamada falla. Necesario para luego descargar el binario.
+  def self.get_file(file_id)
+    result = get("getFile", file_id: file_id)
+    result&.dig("result", "file_path")
+  end
+
+  # Descarga el binario de un archivo desde la CDN de Telegram.
+  # file_path: string devuelto por get_file (ej. "voice/file_123.oga")
+  # Devuelve el string binario, o nil si falla.
+  def self.download_file(file_path)
+    response = file_connection.get(file_path)
+    return nil unless response.status == 200
+    response.body
+  rescue Faraday::Error => e
+    Rails.logger.error("Telegram download_file: #{e.class} — #{e.message}")
+    nil
+  end
+
   # Cuando cambia el TELEGRAM_BOT_TOKEN (en tests o config reload) hay que
   # romper el memo.
   def self.reset_connection!
-    @connection = nil
+    @connection      = nil
+    @file_connection = nil
+  end
+
+  private_class_method def self.file_connection
+    @file_connection ||= Http::Client.connection(
+      base_url: "#{BASE}/file/bot#{ENV['TELEGRAM_BOT_TOKEN']}/",
+      timeout: 30,
+      open_timeout: 5,
+      retries: 1
+    )
   end
 end
