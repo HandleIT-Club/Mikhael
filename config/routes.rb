@@ -19,6 +19,7 @@ Rails.application.routes.draw do
     member { post :regenerate_token }
   end
 
+  resources :memories, only: %i[index destroy]
   resource  :timezone, only: %i[update], controller: "timezone"
   resources :devices,  only: %i[index create update destroy] do
     member do
@@ -34,6 +35,7 @@ Rails.application.routes.draw do
           collection { post :stream, to: "message_streams#create" }
         end
       end
+      resources :memories, only: %i[index destroy]
       resources :models,  only: %i[index]
       resources :devices, only: %i[index create update destroy] do
         member do

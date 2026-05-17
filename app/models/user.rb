@@ -24,6 +24,7 @@ class User < ApplicationRecord
   has_many :conversations, dependent: :destroy
   has_many :reminders,     dependent: :destroy
   has_many :settings,      dependent: :destroy
+  has_many :memories,      dependent: :destroy
 
   validates :email,    presence: true, uniqueness: { case_sensitive: false },
                        format: { with: URI::MailTo::EMAIL_REGEXP }

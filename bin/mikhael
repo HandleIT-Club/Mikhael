@@ -525,6 +525,81 @@ class DevicesMenu
   end
 end
 
+# ─── Gestión de memorias ──────────────────────────────────────────────────────
+
+class MemoriesMenu
+  def self.run
+    new.run
+  end
+
+  def run
+    loop do
+      memories = RailsClient.get("/api/v1/memories") || []
+
+      puts
+      puts C.gold("Memorias guardadas (#{memories.length}):")
+
+      if memories.empty?
+        puts C.dim("  No hay memorias todavía. Se crean automáticamente con /resumir o al llegar a 20 mensajes.")
+        puts
+        return
+      end
+
+      memories.each_with_index do |m, i|
+        date = Time.parse(m["created_at"]).strftime("%d/%m/%Y %H:%M") rescue m["created_at"]
+        puts "  #{C.yellow("[#{i + 1}]")} #{C.dim(date)}"
+        puts "      #{m['summary']}"
+        puts "      #{C.dim(m['keywords'])}"
+        puts
+      end
+
+      puts "  #{C.yellow("[b#]")} Buscar por keyword (ej: b rails)"
+      puts "  #{C.red("[x#]")} Eliminar (ej: x1)"
+      puts "  #{C.dim("[enter]")} Volver"
+      print C.cyan("Elegí: ")
+      choice = $stdin.gets&.chomp&.strip
+
+      break if choice.nil? || choice.empty?
+
+      if choice =~ /^b\s+(.+)$/i
+        keyword = $1.strip
+        results = RailsClient.get("/api/v1/memories?q=#{URI.encode_www_form_component(keyword)}") || []
+        puts
+        if results.empty?
+          puts C.yellow("  Sin resultados para '#{keyword}'.")
+        else
+          puts C.gold("  Memorias con '#{keyword}':")
+          results.each do |m|
+            date = Time.parse(m["created_at"]).strftime("%d/%m") rescue ""
+            puts "  #{C.dim(date)} #{m['summary']}"
+          end
+        end
+        puts
+        next
+      end
+
+      if choice =~ /^x(\d+)$/i
+        idx = $1.to_i - 1
+        if idx >= 0 && idx < memories.length
+          memory = memories[idx]
+          print C.red("¿Eliminar esta memoria? [s/N]: ")
+          if $stdin.gets&.chomp&.downcase == "s"
+            RailsClient.delete("/api/v1/memories/#{memory['id']}")
+            puts C.green("  ✓ Memoria eliminada.")
+          else
+            puts C.dim("  Cancelado.")
+          end
+        else
+          puts C.red("  Número inválido.")
+        end
+        next
+      end
+
+      break
+    end
+  end
+end
+
 # ─── Agente ───────────────────────────────────────────────────────────────────
 
 class Agent
@@ -788,6 +863,7 @@ class Agent
       end
       puts "  #{C.yellow("[n]")} Nueva conversación"
       puts "  #{C.yellow("[d]")} Gestionar dispositivos"
+      puts "  #{C.yellow("[m]")} Ver memorias"
       puts "  #{C.yellow("[o]")} Abrir en el navegador"
       puts "  #{C.red("[x#]")} Eliminar (ej: x1, x2...)"
       print C.cyan("Elegí: ")
@@ -797,6 +873,11 @@ class Agent
 
       if choice == "d"
         DevicesMenu.run
+        return select_or_create_conversation
+      end
+
+      if choice == "m"
+        MemoriesMenu.run
         return select_or_create_conversation
       end
 
@@ -1021,6 +1102,9 @@ class Agent
     when "dispositivos", "devices"
       DevicesMenu.run
       return ""
+    when "memorias", "memories"
+      MemoriesMenu.run
+      return ""
     end
     input
   end
@@ -1035,7 +1119,7 @@ class Agent
     puts C.gold("║") + C.ivory("           M I K H A E L              ") + C.gold("║")
     puts C.gold("╚══════════════════════════════════════╝")
     puts C.cyan("Modo: #{@agent_mode ? 'Agente' : 'Chat'}")
-    puts C.cyan("Comandos: salir · limpiar · convs · open · dispositivos")
+    puts C.cyan("Comandos: salir · limpiar · convs · open · dispositivos · memorias")
     puts
   end
 end

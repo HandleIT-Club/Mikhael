@@ -3,7 +3,7 @@
 # Licensed under AGPL-3.0 — https://www.gnu.org/licenses/agpl-3.0.html
 
 # Maneja slash commands (/zona, /recordatorios, /dispositivos, /borrar_recordatorio,
-# /reset, /start) de forma uniforme entre web y Telegram. Devuelve nil si el
+# /reset, /resumir, /start) de forma uniforme entre web y Telegram. Devuelve nil si el
 # texto no es un comando — el caller sigue al flujo normal (intent router → AI).
 #
 # Scoping: los comandos que tocan recursos per-user (recordatorios, zona)
@@ -14,13 +14,14 @@ class CommandRouter
     def self.message(text) = new(reply: text)
   end
 
-  def self.handle(text, user:)
-    new(text.to_s.strip, user: user).handle
+  def self.handle(text, user:, conversation: nil)
+    new(text.to_s.strip, user: user, conversation: conversation).handle
   end
 
-  def initialize(text, user:)
-    @text = text
-    @user = user
+  def initialize(text, user:, conversation: nil)
+    @text         = text
+    @user         = user
+    @conversation = conversation
   end
 
   def handle
@@ -34,6 +35,7 @@ class CommandRouter
     when /\A\/borrar_recordatorio\s+(\d+)\z/
       delete_reminder(Regexp.last_match(1).to_i)
     when "/reset"           then Result.message("✅ Conversación reiniciada.")
+    when "/resumir"         then summarize_conversation
     else nil
     end
   end
@@ -51,8 +53,22 @@ class CommandRouter
       "`/borrar_recordatorio <id>` — cancelar un recordatorio\n" \
       "`/zona <nombre>` — configurar zona horaria (ej: `/zona Buenos Aires`)\n" \
       "`/zona` — ver zona actual\n" \
+      "`/resumir` — guardar un resumen de la conversación actual\n" \
       "`/reset` — empezar de cero"
     )
+  end
+
+  def summarize_conversation
+    unless @conversation
+      return Result.message("❌ No hay conversación activa para resumir.")
+    end
+
+    if @conversation.chat_messages.count < 2
+      return Result.message("❌ La conversación es muy corta para resumir.")
+    end
+
+    GenerateMemoryJob.perform_now(@conversation.id)
+    Result.message("✅ Resumen guardado en memorias.")
   end
 
   # Dispositivos son compartidos (decisión de arquitectura: hogar).

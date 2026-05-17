@@ -56,8 +56,9 @@ class AssistantContext
     Digest::SHA256.hexdigest(static_prompt + primer.to_json)
   end
 
-  def build
-    "#{static_prompt}\n\n#{dynamic_prompt}"
+  def build(memories: [])
+    base = "#{static_prompt}\n\n#{dynamic_prompt}"
+    memories.any? ? "#{base}\n\n#{memories_section(memories)}" : base
   end
 
   def primer
@@ -178,5 +179,10 @@ class AssistantContext
     when :web      then "- Sos directo y conciso. Evitá listas con bullets, secciones largas o tipo \"informe\". Respondé como en un chat real."
     when :cli      then "- Sos preciso y directo. Salida pensada para terminal: párrafos cortos, código en bloques."
     end
+  end
+
+  def memories_section(memories)
+    lines = memories.map { |m| "- #{m.summary}" }
+    "Conversaciones anteriores relevantes:\n#{lines.join("\n")}"
   end
 end
