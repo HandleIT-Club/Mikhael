@@ -3,7 +3,8 @@
 # Licensed under AGPL-3.0 — https://www.gnu.org/licenses/agpl-3.0.html
 class Conversation < ApplicationRecord
   belongs_to :user
-  has_many :messages, dependent: :destroy
+  has_many :messages,  dependent: :destroy
+  has_many :memories,  dependent: :nullify
 
   # Delegamos al registry para evitar duplicar el mapping y para que la
   # memoización viva en un solo lugar.
@@ -20,6 +21,13 @@ class Conversation < ApplicationRecord
 
   def chat_messages
     messages.where.not(role: "system").order(:created_at)
+  end
+
+  # Mensajes que el AI debe recibir como contexto — excluye los anteriores al
+  # context_cutoff_at (marcado cuando se genera una Memory de la conversación).
+  def context_messages
+    base = messages.where.not(role: "system").order(:created_at)
+    context_cutoff_at ? base.where("created_at > ?", context_cutoff_at) : base
   end
 
   private

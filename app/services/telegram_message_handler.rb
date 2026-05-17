@@ -26,8 +26,9 @@ class TelegramMessageHandler
 
     Current.user = @user
 
-    stripped = text.to_s.strip
-    router   = CommandRouter.new(stripped, user: @user)
+    stripped     = text.to_s.strip
+    conversation = existing_telegram_conversation
+    router       = CommandRouter.new(stripped, user: @user, conversation: conversation)
 
     if router.reset_command?
       reset_conversation
@@ -85,6 +86,10 @@ class TelegramMessageHandler
 
   def reset_conversation
     @user.conversations.where(title: TELEGRAM_CONV_TITLE).destroy_all
+  end
+
+  def existing_telegram_conversation
+    @user.conversations.find_by(title: TELEGRAM_CONV_TITLE)
   end
 
   def find_or_create_conversation

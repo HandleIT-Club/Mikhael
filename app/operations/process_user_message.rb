@@ -35,10 +35,12 @@ class ProcessUserMessage
     return Failure(:invalid_input) if content.strip.empty?
 
     Rails.logger.tagged("user=#{@user&.id || '-'}", "conv=#{@conversation.id}") do
+      relevant_memories = first_message? ? Memory.relevant_for(user: @user, message: content).to_a : []
+
       user_message = persist_user_message(content)
       @broadcaster.append_message(user_message)
 
-      if (cmd = CommandRouter.handle(content, user: @user))
+      if (cmd = CommandRouter.handle(content, user: @user, conversation: @conversation))
         Rails.logger.info("ProcessUserMessage: command match — content=#{content.truncate(40).inspect}")
         return Success(reply_with_text(cmd.reply))
       end
@@ -49,7 +51,7 @@ class ProcessUserMessage
       end
 
       Rails.logger.info("ProcessUserMessage: AI turn — model=#{@conversation.model_id} provider=#{@conversation.provider}")
-      run_ai_turn(content, user_message)
+      run_ai_turn(content, user_message, relevant_memories)
     end
   end
 
@@ -68,7 +70,7 @@ class ProcessUserMessage
     Outcome.new(kind: :deterministic, assistant_message: assistant_msg)
   end
 
-  def run_ai_turn(content, user_message)
+  def run_ai_turn(content, user_message, relevant_memories = [])
     @broadcaster.show_streaming_placeholder
     original_model = @conversation.model_id
 
@@ -78,7 +80,7 @@ class ProcessUserMessage
       conversation:  @conversation,
       content:       content,
       user_message:  user_message,
-      system_prompt: context.build,
+      system_prompt: context.build(memories: relevant_memories),
       primer:        context.primer,
       on_chunk:      ->(chunk) { buffer << chunk; @broadcaster.stream_chunk(buffer) }
     )
@@ -110,8 +112,18 @@ class ProcessUserMessage
 
     maybe_update_title
     @broadcaster.update_model_selector if @conversation.model_id != original_model
+    maybe_generate_memory
 
     Success(Outcome.new(kind: :ai, assistant_message: assistant_msg))
+  end
+
+  def first_message?
+    @conversation.messages.empty?
+  end
+
+  def maybe_generate_memory
+    count = @conversation.chat_messages.count
+    GenerateMemoryJob.perform_later(@conversation.id) if count >= Memory::TRIGGER_COUNT && count % Memory::TRIGGER_COUNT == 0
   end
 
   # Genera un título a partir del primer prompt del user al segundo turno.

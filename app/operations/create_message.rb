@@ -69,7 +69,7 @@ class CreateMessage
   def build_messages(conversation, system_prompt_override = nil, primer = nil)
     prompt        = system_prompt_override || system_prompt_for(conversation)
     system_prompt = { role: "system", content: prompt }
-    messages      = conversation.chat_messages
+    messages      = conversation.context_messages
     messages      = messages.last(HISTORY_LIMIT_WITH_OVERRIDE) if system_prompt_override
     chat_history  = messages.map { |m| { role: m.role, content: m.content } }
     [ system_prompt ] + Array(primer) + chat_history
