@@ -1,0 +1,36 @@
+services:
+  web:
+    build: .
+    image: mikhael
+    command: ./bin/rails server -b 0.0.0.0 -p 3000
+    ports:
+      - "7777:3000"
+    env_file: .env
+    environment:
+      RAILS_ENV: production
+      PORT: 3000
+    volumes:
+      - mikhael-storage:/rails/storage
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/up"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  worker:
+    image: mikhael
+    command: ./bin/jobs
+    env_file: .env
+    environment:
+      RAILS_ENV: production
+    volumes:
+      - mikhael-storage:/rails/storage
+    depends_on:
+      web:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  mikhael-storage:
