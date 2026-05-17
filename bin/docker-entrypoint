@@ -6,9 +6,24 @@ if [ -z "${LD_PRELOAD+x}" ]; then
     export LD_PRELOAD
 fi
 
-# If running the rails server then create or migrate existing database
-if [ "${@: -2:1}" == "./bin/rails" ] && [ "${@: -1:1}" == "server" ]; then
-  ./bin/rails db:prepare
+# SECRET_KEY_BASE: si no viene por ENV ni hay master.key, lo generamos una vez
+# y lo persistimos en el volumen de storage. Sobrevive reinicios sin pedirle
+# al usuario generar claves a mano.
+if [ -z "${SECRET_KEY_BASE+x}" ] && [ -z "${RAILS_MASTER_KEY+x}" ]; then
+    KEY_FILE="/rails/storage/secret_key_base"
+    if [ ! -f "$KEY_FILE" ]; then
+        ./bin/rails secret > "$KEY_FILE"
+    fi
+    SECRET_KEY_BASE=$(cat "$KEY_FILE")
+    export SECRET_KEY_BASE
 fi
+
+# Preparar DBs cuando el comando es el web (rails server) o el worker (bin/jobs).
+# db:prepare es idempotente: crea si faltan, migra si hay pendientes, no toca lo demás.
+case "$*" in
+    *"bin/rails server"*|*"bin/jobs"*)
+        ./bin/rails db:prepare
+        ;;
+esac
 
 exec "${@}"

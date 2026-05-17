@@ -81,11 +81,41 @@ Solid trio (Cache, Queue, Cable) · dry-monads · Faraday · RubyLLM · MQTT.
 
 ## Quickstart
 
+### Camino más fácil: Docker
+
+Si tenés Docker instalado, este es el camino más corto — no necesitás
+Ruby, Rails, ni SQLite en tu máquina:
+
+```bash
+git clone https://github.com/tu-usuario/mikhael.git
+cd mikhael
+cp .env.example .env                              # editá: poné tu GROQ_API_KEY
+docker compose up -d                              # primera vez: build (~2-3 min)
+```
+
+Abrí <http://localhost:7777> → el wizard te lleva a `/setup` para crear el
+primer admin. Listo.
+
+> Puerto 7777 (cuádruple siete: perfección divina × 4), elegido para no
+> chocar con el `:3000` típico de Rails dev.
+
+Comandos útiles:
+
+```bash
+docker compose logs -f                            # ver logs en vivo
+docker compose down                               # apagar (datos persisten)
+docker compose exec web bin/rails users:create \  # crear más admins
+  EMAIL=otro@ejemplo.com PASSWORD=algo_de_12_chars_min
+```
+
+### Alternativa: instalación local (sin Docker)
+
 ```bash
 git clone https://github.com/tu-usuario/mikhael.git
 cd mikhael
 bundle install
 cp .env.example .env                              # mínimo: GROQ_API_KEY
+# Ojo: cambiá MIKHAEL_URL a http://localhost:3000 (default de bin/dev)
 bin/rails db:prepare                              # crea las 4 DBs (primary + queue + cache + cable)
 bin/rails users:create EMAIL=tu@mail.com PASSWORD=algo_de_12_chars_min
 #                                       ⤴ imprime tu API token — guardalo
