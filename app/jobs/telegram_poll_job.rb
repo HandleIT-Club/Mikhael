@@ -14,6 +14,8 @@
 # return sin tocar el offset, evitando que ambos procesen los mismos updates
 # y dupliquen mensajes.
 class TelegramPollJob < ApplicationJob
+  include Dry::Monads[:result]
+
   queue_as :default
 
   OFFSET_KEY     = "telegram_poll_offset".freeze
@@ -69,6 +71,12 @@ class TelegramPollJob < ApplicationJob
 
     chat_id = message.dig("chat", "id").to_s
     text    = message["text"].to_s.strip
+
+    if text.empty? && message["voice"]
+      text = transcribe_voice(message["voice"], chat_id)
+      return if text.nil?
+    end
+
     return if text.empty?
 
     user = User.find_by(telegram_chat_id: chat_id)
@@ -83,5 +91,42 @@ class TelegramPollJob < ApplicationJob
     TelegramMessageHandler.new(user: user, chat_id: chat_id).call(text)
   rescue => e
     Rails.logger.error("TelegramPollJob#process: #{e.class} — #{e.message}\n#{e.backtrace.first(5).join("\n")}")
+  end
+
+  # Descarga el audio de Telegram y lo transcribe con Groq Whisper.
+  # Devuelve el texto transcripto, o nil si algo falló (el error ya fue
+  # notificado al usuario con send_message).
+  def transcribe_voice(voice, chat_id)
+    unless ENV["GROQ_API_KEY"].present?
+      TelegramClient.send_message("🎤 Entrada por voz deshabilitada (GROQ_API_KEY no configurada).", chat_id: chat_id)
+      return nil
+    end
+
+    file_path = TelegramClient.get_file(voice["file_id"])
+    unless file_path
+      TelegramClient.send_message("No pude acceder al audio. ¿Podés escribirlo?", chat_id: chat_id)
+      return nil
+    end
+
+    audio_data = TelegramClient.download_file(file_path)
+    unless audio_data
+      TelegramClient.send_message("No pude descargar el audio. ¿Podés escribirlo?", chat_id: chat_id)
+      return nil
+    end
+
+    case Ai::WhisperClient.new.transcribe(audio_data)
+    in Success(text)
+      Rails.logger.info("TelegramPollJob: voz transcripta para chat=#{chat_id}: #{text.first(80).inspect}")
+      text
+    in Failure(:rate_limited)
+      TelegramClient.send_message("Whisper alcanzó el límite diario. Intentá mañana o escribilo.", chat_id: chat_id)
+      nil
+    in Failure(:whisper_unavailable)
+      TelegramClient.send_message("🎤 Entrada por voz deshabilitada (GROQ_API_KEY no configurada).", chat_id: chat_id)
+      nil
+    else
+      TelegramClient.send_message("No pude entender el audio. ¿Podés escribirlo?", chat_id: chat_id)
+      nil
+    end
   end
 end

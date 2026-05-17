@@ -21,7 +21,7 @@ automático, o **100% offline** con Ollama.
 ![Hotwire](https://img.shields.io/badge/Hotwire-Turbo-8b5cf6?style=flat-square)
 ![Telegram](https://img.shields.io/badge/Telegram-Bot-26A5E4?style=flat-square&logo=telegram&logoColor=white)
 ![MQTT](https://img.shields.io/badge/MQTT-IoT-660066?style=flat-square)
-![Tests](https://img.shields.io/badge/Tests-288%20passing-22c55e?style=flat-square)
+![Tests](https://img.shields.io/badge/Tests-359%20passing-22c55e?style=flat-square)
 ![License](https://img.shields.io/badge/Licencia-AGPL--3.0-blue?style=flat-square)
 
 </div>
@@ -45,6 +45,17 @@ tus conversaciones y del control de tus dispositivos físicos.
 
 Todos contra el mismo backend Rails. Una conversación de la web aparece en
 el CLI; un comando por Telegram dispara una acción en el ESP32 vía MQTT.
+
+#### 🎤 Entrada por voz en Telegram
+
+Mandás una nota de voz al bot → Whisper (Groq) la transcribe → el texto
+entra al pipeline como si lo hubieras escrito.
+
+**Límite gratuito de Groq Whisper:** 2 000 req/día · 28 800 s de audio/día.
+Si se alcanza el límite, Mikhael te avisa. No hay fallback a otro proveedor
+(solo Groq ofrece Whisper gratuito).
+
+Requiere `GROQ_API_KEY` — la misma que ya usás para los modelos de chat.
 
 ### Lo que podés hacer con tus microcontroladores
 
