@@ -9,7 +9,9 @@ Rails.application.routes.draw do
   post "/setup", to: "setup#create"
 
   resources :conversations, only: %i[index show create update destroy] do
-    resources :messages, only: %i[create]
+    resources :messages, only: %i[create] do
+      collection { post :transcribe }
+    end
   end
 
   # Settings: una sola página admin-only con contexto del asistente + users.

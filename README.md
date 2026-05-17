@@ -21,7 +21,7 @@ automático, o **100% offline** con Ollama.
 ![Hotwire](https://img.shields.io/badge/Hotwire-Turbo-8b5cf6?style=flat-square)
 ![Telegram](https://img.shields.io/badge/Telegram-Bot-26A5E4?style=flat-square&logo=telegram&logoColor=white)
 ![MQTT](https://img.shields.io/badge/MQTT-IoT-660066?style=flat-square)
-![Tests](https://img.shields.io/badge/Tests-359%20passing-22c55e?style=flat-square)
+![Tests](https://img.shields.io/badge/Tests-364%20passing-22c55e?style=flat-square)
 ![License](https://img.shields.io/badge/Licencia-AGPL--3.0-blue?style=flat-square)
 
 </div>

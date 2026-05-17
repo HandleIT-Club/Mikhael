@@ -143,4 +143,52 @@ RSpec.describe "Web MessagesController", type: :request do
       expect(conversation.messages).to be_empty
     end
   end
+
+  describe "POST transcribe (voz)" do
+    let(:whisper)    { instance_double(Ai::WhisperClient) }
+    let(:audio_file) { Rack::Test::UploadedFile.new(StringIO.new("fake-audio"), "audio/webm", true, original_filename: "voice.webm") }
+
+    before do
+      allow(Ai::WhisperClient).to receive(:new).and_return(whisper)
+    end
+
+    def post_audio(file = audio_file)
+      post transcribe_conversation_messages_path(conversation),
+           params: { audio: file }
+    end
+
+    it "devuelve el texto transcripto con 200" do
+      allow(whisper).to receive(:transcribe).and_return(Dry::Monads::Success("apagá la luz"))
+      post_audio
+      expect(response).to have_http_status(:ok)
+      expect(JSON.parse(response.body)["text"]).to eq("apagá la luz")
+    end
+
+    it "devuelve 429 cuando Whisper alcanza el límite diario" do
+      allow(whisper).to receive(:transcribe).and_return(Dry::Monads::Failure(:rate_limited))
+      post_audio
+      expect(response).to have_http_status(:too_many_requests)
+      expect(JSON.parse(response.body)["error"]).to eq("rate_limited")
+    end
+
+    it "devuelve 503 cuando Whisper no está configurado" do
+      allow(whisper).to receive(:transcribe).and_return(Dry::Monads::Failure(:whisper_unavailable))
+      post_audio
+      expect(response).to have_http_status(:service_unavailable)
+      expect(JSON.parse(response.body)["error"]).to eq("unavailable")
+    end
+
+    it "devuelve 422 cuando la transcripción falla" do
+      allow(whisper).to receive(:transcribe).and_return(Dry::Monads::Failure(:ai_error))
+      post_audio
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(JSON.parse(response.body)["error"]).to eq("failed")
+    end
+
+    it "devuelve 400 si no se envía audio" do
+      post transcribe_conversation_messages_path(conversation)
+      expect(response).to have_http_status(:bad_request)
+      expect(JSON.parse(response.body)["error"]).to eq("no_audio")
+    end
+  end
 end
