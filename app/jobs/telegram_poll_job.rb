@@ -114,7 +114,7 @@ class TelegramPollJob < ApplicationJob
       return nil
     end
 
-    case Ai::WhisperClient.new.transcribe(audio_data)
+    case Ai::WhisperClient.new.transcribe(audio_data, language: AssistantContext.language)
     in Success(text)
       Rails.logger.info("TelegramPollJob: voz transcripta para chat=#{chat_id}: #{text.first(80).inspect}")
       text

@@ -18,6 +18,7 @@
 
     <nav class="flex-1 overflow-y-auto px-4 py-2 space-y-1">
       <a href="#contexto" class="block px-3 py-2 rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 text-sm transition-colors">⚙ Contexto del asistente</a>
+      <a href="#idioma"   class="block px-3 py-2 rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 text-sm transition-colors">🌐 Idioma</a>
       <a href="#cuentas"  class="block px-3 py-2 rounded-lg text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 text-sm transition-colors">👥 Cuentas</a>
     </nav>
 
@@ -58,6 +59,31 @@
               <%= f.submit "Guardar contexto",
                     class: "px-4 py-2 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold rounded-lg text-sm transition-colors cursor-pointer" %>
             </div>
+          <% end %>
+        </div>
+      </section>
+
+      <%# ─── IDIOMA ──────────────────────────────────────────────────────── %>
+      <section id="idioma">
+        <div class="mb-4">
+          <h1 class="text-2xl font-thin text-amber-400 tracking-wide">Idioma</h1>
+          <p class="text-zinc-500 text-sm mt-1">
+            Idioma de respuesta del asistente y de transcripción de voz (Whisper). Se aplica a web, Telegram y CLI.
+          </p>
+        </div>
+
+        <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+          <%= form_with url: settings_path, method: :patch, local: true, class: "flex items-center gap-4 flex-wrap" do |f| %>
+            <label class="text-sm text-zinc-400">Idioma del asistente</label>
+            <select name="settings[assistant_language]"
+                    class="bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-amber-500">
+              <% AssistantContext::SUPPORTED_LANGUAGES.each do |code, name| %>
+                <option value="<%= code %>" <%= "selected" if @language == code %>><%= name %></option>
+              <% end %>
+            </select>
+            <%= f.hidden_field "settings[assistant_preamble]", value: @preamble %>
+            <%= f.submit "Guardar idioma",
+                  class: "px-4 py-2 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold rounded-lg text-sm transition-colors cursor-pointer" %>
           <% end %>
         </div>
       </section>

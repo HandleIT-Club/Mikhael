@@ -22,18 +22,20 @@ module Ai
 
     # audio_data: string binario (bytes del .ogg u otro formato soportado)
     # filename:   nombre con extensión — Telegram manda OGG para notas de voz
+    # language:   código ISO 639-1 (ej. "es", "en") — mejora la precisión
+    #             y evita detección automática errónea. nil = auto-detect.
     #
     # Devuelve:
     #   Success(String)               texto transcripto
     #   Failure(:whisper_unavailable) GROQ_API_KEY no configurada
     #   Failure(:rate_limited)        429 de Groq (límite diario alcanzado)
     #   Failure(:ai_error)            cualquier otro fallo
-    def transcribe(audio_data, filename: "voice.ogg")
+    def transcribe(audio_data, filename: "voice.ogg", language: nil)
       key = ENV["GROQ_API_KEY"].presence
       return Failure(:whisper_unavailable) if key.blank?
 
       boundary = "----MikhaelWhisper#{SecureRandom.hex(8)}"
-      body     = build_multipart(audio_data, filename, boundary)
+      body     = build_multipart(audio_data, filename, boundary, language: language)
 
       uri = URI(ENDPOINT)
       Net::HTTP.start(uri.host, uri.port, use_ssl: true, read_timeout: 30, open_timeout: 5) do |http|
@@ -67,7 +69,7 @@ module Ai
       end
     end
 
-    def build_multipart(audio_data, filename, boundary)
+    def build_multipart(audio_data, filename, boundary, language: nil)
       crlf = "\r\n"
       body = +"--#{boundary}#{crlf}"
       body << "Content-Disposition: form-data; name=\"file\"; filename=\"#{filename}\"#{crlf}"
@@ -76,6 +78,11 @@ module Ai
       body << "#{crlf}--#{boundary}#{crlf}"
       body << "Content-Disposition: form-data; name=\"model\"#{crlf}#{crlf}"
       body << MODEL
+      if language.present?
+        body << "#{crlf}--#{boundary}#{crlf}"
+        body << "Content-Disposition: form-data; name=\"language\"#{crlf}#{crlf}"
+        body << language
+      end
       body << "#{crlf}--#{boundary}--#{crlf}"
       body.force_encoding("BINARY")
     end

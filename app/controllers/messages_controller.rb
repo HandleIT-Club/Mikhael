@@ -10,7 +10,7 @@ class MessagesController < ApplicationController
     file = params[:audio]
     return render json: { error: "no_audio" }, status: :bad_request if file.blank?
 
-    case Ai::WhisperClient.new.transcribe(file.read, filename: file.original_filename)
+    case Ai::WhisperClient.new.transcribe(file.read, filename: file.original_filename, language: AssistantContext.language)
     in Success(text)
       render json: { text: text }
     in Failure(:rate_limited)

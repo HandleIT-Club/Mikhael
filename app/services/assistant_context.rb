@@ -26,6 +26,18 @@
 class AssistantContext
   SURFACES        = %i[web telegram cli].freeze
   PREAMBLE_KEY    = "assistant_preamble".freeze
+  LANGUAGE_KEY    = "assistant_language".freeze
+  DEFAULT_LANGUAGE = "es".freeze
+
+  SUPPORTED_LANGUAGES = {
+    "es" => "español",
+    "en" => "English",
+    "pt" => "português",
+    "fr" => "français",
+    "de" => "Deutsch",
+    "it" => "italiano"
+  }.freeze
+
   DEFAULT_PREAMBLE = <<~PREAMBLE.strip.freeze
     Sos Mikhael — un asistente personal. Respondé en español, de forma clara, breve y natural.
     Cuando muestres código, usá bloques markdown con el lenguaje correcto.
@@ -43,6 +55,15 @@ class AssistantContext
 
   def self.set_preamble(value)
     Setting.set(PREAMBLE_KEY, value.to_s.strip)
+  end
+
+  def self.language
+    Setting.get(LANGUAGE_KEY, DEFAULT_LANGUAGE).presence || DEFAULT_LANGUAGE
+  end
+
+  def self.set_language(value)
+    lang = value.to_s.strip.downcase
+    Setting.set(LANGUAGE_KEY, SUPPORTED_LANGUAGES.key?(lang) ? lang : DEFAULT_LANGUAGE)
   end
 
   def initialize(surface)
@@ -93,6 +114,8 @@ class AssistantContext
   def static_prompt
     <<~PROMPT
       #{self.class.preamble}
+
+      #{language_instruction}
 
       REGLAS (no negociables):
       - NUNCA inventes el estado de un dispositivo, ni digas que "actualizaste software", "detectaste un sensor con problemas", "el riego se está ejecutando", etc. Vos NO sabés el estado real — solo Rails lo sabe. Si te preguntan por el estado, respondé con lo que aparece en "Dispositivos del usuario" abajo (online/offline + acciones disponibles), nada más.
@@ -179,6 +202,12 @@ class AssistantContext
     when :web      then "- Sos directo y conciso. Evitá listas con bullets, secciones largas o tipo \"informe\". Respondé como en un chat real."
     when :cli      then "- Sos preciso y directo. Salida pensada para terminal: párrafos cortos, código en bloques."
     end
+  end
+
+  def language_instruction
+    lang_name = SUPPORTED_LANGUAGES.fetch(self.class.language, self.class.language)
+    "Idioma: respondé **siempre** en #{lang_name}, sin excepciones. " \
+      "Si el usuario escribe en otro idioma, respondele igual en #{lang_name}."
   end
 
   def memories_section(memories)
